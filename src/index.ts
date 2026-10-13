@@ -48,16 +48,32 @@ async function ownerChat(store: Store, env: Env): Promise<string | null> {
   return store.get("owner");
 }
 
+function errorText(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.replace(/\s+/g, " ").slice(0, 350);
+}
+
+async function tell(env: Env, chatId: string | null, text: string): Promise<void> {
+  if (!env.TELEGRAM_BOT_TOKEN || !chatId) return;
+  await sendTelegram(env.TELEGRAM_BOT_TOKEN, chatId, text).catch((error: unknown) => {
+    console.error(errorText(error));
+  });
+}
+
 async function sendWeeklySeo(env: Env): Promise<void> {
   if (!env.TELEGRAM_BOT_TOKEN) return;
   const store = storeOf(env);
   const now = new Date();
   const lock = `seo-report:${moscowParts(now).iso}`;
-  if (!shouldSendWeeklySeo(now, Boolean(await store.get(lock)))) return;
   const chatId = await ownerChat(store, env);
-  if (!chatId) return;
-  await store.put(lock, now.toISOString(), 36 * 3600);
-  await sendTelegram(env.TELEGRAM_BOT_TOKEN, chatId, await inspectSite(fetch));
+  if (!chatId || !shouldSendWeeklySeo(now, Boolean(await store.get(lock)))) return;
+  try {
+    await sendTelegram(env.TELEGRAM_BOT_TOKEN, chatId, await inspectSite(fetch));
+    await sendTelegram(env.TELEGRAM_BOT_TOKEN, chatId, "SEO-отчёт доставлен.");
+    await store.put(lock, now.toISOString(), 36 * 3600);
+  } catch (error) {
+    await tell(env, chatId, `SEO-отчёт не собрался: ${errorText(error)}`);
+  }
 }
 
 async function deliver(env: Env, force: boolean): Promise<void> {
@@ -83,8 +99,22 @@ async function handleMessage(env: Env, update: TelegramUpdate): Promise<void> {
   const chat = String(chatId);
   const send = (message: string) => sendTelegram(env.TELEGRAM_BOT_TOKEN, chat, message);
   const store = storeOf(env);
-  const owner = await ownerChat(store, env);
   const command = commandFromText(text);
+  try {
+    await routeMessage(env, store, chat, command, send);
+  } catch (error) {
+    await tell(env, chat, `Не получилось выполнить команду: ${errorText(error)}`);
+  }
+}
+
+async function routeMessage(
+  env: Env,
+  store: Store,
+  chat: string,
+  command: string,
+  send: (message: string) => Promise<void>,
+): Promise<void> {
+  const owner = await ownerChat(store, env);
 
   if (owner && owner !== chat) {
     await send("Этот бот уже привязан к другому чату.");
@@ -136,8 +166,19 @@ async function handleMessage(env: Env, update: TelegramUpdate): Promise<void> {
     return;
   }
   if (command === "/seo") {
-    await send("Проверяю petr-alekseev.ru.");
-    await send(await inspectSite(fetch));
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const report = await Promise.race([
+        inspectSite(fetch),
+        new Promise<string>((_, reject) => {
+          timer = setTimeout(() => reject(new Error("проверка сайта не уложилась в 20 секунд")), 20_000);
+        }),
+      ]);
+      await send(report);
+      await send("SEO-отчёт доставлен.");
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
     return;
   }
   await send("Не понял команду. Список команд: /help");
@@ -156,9 +197,15 @@ export default {
       return new Response("unauthorized", { status: 401 });
     }
     const update = (await request.json()) as TelegramUpdate;
+    const text = update.message?.text?.trim() ?? "";
+    const chatId = update.message?.chat?.id;
+    if (text && chatId !== undefined && commandFromText(text) === "/seo" && env.TELEGRAM_BOT_TOKEN) {
+      await tell(env, String(chatId), "Принял «SEO отчёт». Собираю данные по petr-alekseev.ru.");
+    }
     ctx.waitUntil(
-      handleMessage(env, update).catch((error: unknown) => {
-        console.error(error instanceof Error ? error.message : error);
+      handleMessage(env, update).catch(async (error: unknown) => {
+        console.error(errorText(error));
+        if (chatId !== undefined) await tell(env, String(chatId), `Не получилось: ${errorText(error)}`);
       }),
     );
     return new Response("ok");
@@ -167,11 +214,21 @@ export default {
   async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     ctx.waitUntil(
       (async () => {
-        await sendWeeklySeo(env);
-        await deliver(env, false);
-      })().catch((error: unknown) => {
-        console.error(error instanceof Error ? error.message : error);
-      }),
+        try {
+          await deliver(env, false);
+        } catch (error) {
+          console.error(errorText(error));
+          const chatId = env.OWNER_CHAT_ID || (await storeOf(env).get("owner"));
+          await tell(env, chatId, `Подборка вакансий не собралась: ${errorText(error)}`);
+        }
+        try {
+          await sendWeeklySeo(env);
+        } catch (error) {
+          console.error(errorText(error));
+          const chatId = env.OWNER_CHAT_ID || (await storeOf(env).get("owner"));
+          await tell(env, chatId, `SEO-отчёт не собрался: ${errorText(error)}`);
+        }
+      })(),
     );
   },
 } satisfies ExportedHandler<Env>;

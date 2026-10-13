@@ -60,15 +60,16 @@ const buttonCommands: Record<string, string> = {
   пауза: "/pause",
   включить: "/resume",
   справка: "/help",
-  "seo отчёт": "/seo",
   "seo отчет": "/seo",
 };
 
 export function commandFromText(text: string): string {
-  const trimmed = text.trim();
-  const button = buttonCommands[trimmed.toLowerCase()];
+  const normalized = text.trim().toLowerCase().replace(/ё/g, "е");
+  const button = buttonCommands[normalized];
   if (button) return button;
-  return (trimmed.split(/\s+/)[0] ?? "").split("@")[0].toLowerCase();
+  const head = (normalized.split(/\s+/)[0] ?? "").split("@")[0];
+  if (head === "seo" || head === "/seo") return "/seo";
+  return head;
 }
 
 export async function sendTelegram(token: string, chatId: string, text: string, fetchImpl: typeof fetch = fetch): Promise<void> {
@@ -89,7 +90,8 @@ export async function sendTelegram(token: string, chatId: string, text: string, 
     body: JSON.stringify({ ...payload, text: text.replace(/<[^>]+>/g, "") }),
   });
   if (!plain.ok) {
-    throw new Error(`Telegram ${plain.status}`);
+    const detail = (await plain.text()).replace(/\s+/g, " ").slice(0, 180);
+    throw new Error(`Telegram ${plain.status}${detail ? `: ${detail}` : ""}`);
   }
 }
 

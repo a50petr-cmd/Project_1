@@ -42,12 +42,27 @@ async function readUrl(fetchImpl: FetchLike, url: string): Promise<{ status: num
     const response = await fetchImpl(url, {
       headers: { "User-Agent": USER_AGENT, Accept: "*/*" },
       redirect: "follow",
-      signal: AbortSignal.timeout(12_000),
+      signal: AbortSignal.timeout(8_000),
     });
-    return { status: response.status, body: await response.text(), error: "" };
+    const body = (await response.text()).slice(0, 20_000);
+    return { status: response.status, body, error: "" };
   } catch (error) {
     return { status: 0, body: "", error: error instanceof Error ? error.message : String(error) };
   }
+}
+
+async function mapPool<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const output: R[] = new Array(items.length);
+  let cursor = 0;
+  async function worker(): Promise<void> {
+    while (cursor < items.length) {
+      const index = cursor;
+      cursor += 1;
+      output[index] = await fn(items[index]);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, () => worker()));
+  return output;
 }
 
 function factsFrom(url: string, status: number, body: string, error: string): PageFacts {
@@ -85,12 +100,11 @@ export async function inspectSite(fetchImpl: FetchLike, origin = SITE_ORIGIN): P
     readUrl(fetchImpl, "https://www.petr-alekseev.ru/"),
     readUrl(fetchImpl, `${root}/index.html`),
   ]);
-  const urls = sitemapUrls(sitemap.body);
-  const pages: PageFacts[] = [];
-  for (const url of urls) {
+  const urls = sitemapUrls(sitemap.body).slice(0, 25);
+  const pages = await mapPool(urls, 4, async (url) => {
     const loaded = await readUrl(fetchImpl, url);
-    pages.push(factsFrom(url, loaded.status, loaded.body, loaded.error));
-  }
+    return factsFrom(url, loaded.status, loaded.body, loaded.error);
+  });
   const homeFacts = factsFrom(`${root}/`, home.status, home.body, home.error);
   return renderSeoReport({
     dateLabel: formatMoscowDate(new Date()),
@@ -125,6 +139,12 @@ export function renderSeoReport(input: {
       ? `В карте ${input.pages.length} страниц.`
       : "Карта сайта не открылась или в ней нет адресов.",
   ];
+  const opened = input.pages.filter((page) => page.ok).length;
+  if (input.pages.length > 0) {
+    lines.push(
+      `Проверено страниц: ${input.pages.length}. Открылись: ${opened}. С заголовком: ${input.pages.filter((page) => page.title).length}. С описанием: ${input.pages.filter((page) => page.description).length}. С h1: ${input.pages.filter((page) => page.h1).length}. С канонической ссылкой: ${input.pages.filter((page) => page.canonical).length}.`,
+    );
+  }
   if (input.pages.length > 0 && problems.length === 0) {
     lines.push("Все страницы из карты открываются. У каждой есть заголовок, описание, каноническая ссылка и h1.");
   } else if (problems.length > 0) {
@@ -142,6 +162,7 @@ export function renderSeoReport(input: {
     lines.push("Яндекс Метрика на главной включается только после согласия на cookie. До согласия визиты в отчёт Метрики не попадают.");
   }
   if (input.home.title) lines.push(`Главная: «${input.home.title}».`);
+  lines.push("", "Итог: отчёт собран.");
   return lines.join("\n");
 }
 
