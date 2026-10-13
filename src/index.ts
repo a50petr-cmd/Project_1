@@ -1,4 +1,6 @@
+import { moscowParts } from "./calendar.ts";
 import { runDigest, setPaused } from "./digest.ts";
+import { inspectSite, shouldSendWeeklySeo } from "./seo.ts";
 import { profile } from "./profile.ts";
 import { readSettings, type Settings, type Store } from "./store.ts";
 import { commandFromText, helpText, publishCommands, sendTelegram } from "./telegram.ts";
@@ -44,6 +46,18 @@ function settingsFromEnv(env: Env): Partial<Settings> {
 async function ownerChat(store: Store, env: Env): Promise<string | null> {
   if (env.OWNER_CHAT_ID) return env.OWNER_CHAT_ID;
   return store.get("owner");
+}
+
+async function sendWeeklySeo(env: Env): Promise<void> {
+  if (!env.TELEGRAM_BOT_TOKEN) return;
+  const store = storeOf(env);
+  const now = new Date();
+  const lock = `seo-report:${moscowParts(now).iso}`;
+  if (!shouldSendWeeklySeo(now, Boolean(await store.get(lock)))) return;
+  const chatId = await ownerChat(store, env);
+  if (!chatId) return;
+  await store.put(lock, now.toISOString(), 36 * 3600);
+  await sendTelegram(env.TELEGRAM_BOT_TOKEN, chatId, await inspectSite(fetch));
 }
 
 async function deliver(env: Env, force: boolean): Promise<void> {
@@ -121,6 +135,11 @@ async function handleMessage(env: Env, update: TelegramUpdate): Promise<void> {
     await deliver(env, true);
     return;
   }
+  if (command === "/seo") {
+    await send("Проверяю petr-alekseev.ru.");
+    await send(await inspectSite(fetch));
+    return;
+  }
   await send("Не понял команду. Список команд: /help");
 }
 
@@ -147,7 +166,10 @@ export default {
 
   async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     ctx.waitUntil(
-      deliver(env, false).catch((error: unknown) => {
+      (async () => {
+        await sendWeeklySeo(env);
+        await deliver(env, false);
+      })().catch((error: unknown) => {
         console.error(error instanceof Error ? error.message : error);
       }),
     );

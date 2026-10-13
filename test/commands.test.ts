@@ -8,5 +8,6 @@ test("buttons map to the same commands as slash text", () => {
   assert.equal(commandFromText("Пауза"), "/pause");
   assert.equal(commandFromText("Включить"), "/resume");
   assert.equal(commandFromText("Справка"), "/help");
+  assert.equal(commandFromText("SEO отчёт"), "/seo");
   assert.equal(commandFromText("/search@JobBot"), "/search");
 });

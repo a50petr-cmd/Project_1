@@ -48,7 +48,7 @@ export const commandKeyboard = {
   keyboard: [
     [{ text: "Найти вакансии" }, { text: "Статус" }],
     [{ text: "Пауза" }, { text: "Включить" }],
-    [{ text: "Справка" }],
+    [{ text: "Справка" }, { text: "SEO отчёт" }],
   ],
   resize_keyboard: true,
   is_persistent: true,
@@ -60,6 +60,8 @@ const buttonCommands: Record<string, string> = {
   пауза: "/pause",
   включить: "/resume",
   справка: "/help",
+  "seo отчёт": "/seo",
+  "seo отчет": "/seo",
 };
 
 export function commandFromText(text: string): string {
@@ -102,6 +104,7 @@ export async function publishCommands(token: string, fetchImpl: typeof fetch = f
         { command: "pause", description: "Остановить ежедневную рассылку" },
         { command: "resume", description: "Включить рассылку" },
         { command: "help", description: "Справка" },
+        { command: "seo", description: "SEO-отчёт по сайту" },
       ],
     }),
   });
@@ -119,6 +122,7 @@ export const helpText = [
   "",
   "Кнопки под полем ввода вызывают те же команды.",
   "По рабочим дням в 10:00 мск присылаю до 5 новых вакансий и письмо к каждой.",
+  "По понедельникам и по кнопке «SEO отчёт» проверяю petr-alekseev.ru и присылаю, что с сайтом.",
   "Площадки: hh.ru, Зарплата.ру, Работа России, Хабр Карьера. SuperJob подключается ключом API.",
   "Отклик на вакансию сам не отправляю.",
 ].join("\n");
