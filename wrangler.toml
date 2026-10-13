@@ -1,0 +1,17 @@
+name = "alekseev-job-bot"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+
+# 07:00 UTC = 10:00 Москва, понедельник–пятница.
+[triggers]
+crons = ["0 7 * * 1-5"]
+
+# id подставляется после `npm run kv`.
+[[kv_namespaces]]
+binding = "JOBS"
+id = "replace-with-kv-namespace-id"
+
+[vars]
+DIGEST_LIMIT = "5"
+SEARCH_PERIOD_DAYS = "14"
+MIN_SCORE = "78"
