@@ -60,6 +60,39 @@ async function tell(env: Env, chatId: string | null, text: string): Promise<void
   });
 }
 
+function sendPlain(env: Env, chatId: string, text: string): Promise<void> {
+  return sendTelegram(env.TELEGRAM_BOT_TOKEN, chatId, text, fetch, "plain");
+}
+
+async function pushSeoReport(env: Env, chatId: string): Promise<void> {
+  const report = await inspectSite(fetch);
+  await sendPlain(env, chatId, report);
+  const closing = report.includes("Итог: отчёт собран.")
+    ? "SEO-отчёт доставлен."
+    : "SEO-отчёт пришёл не полностью: проверка оборвалась по времени.";
+  await sendPlain(env, chatId, closing);
+}
+
+async function deliverSeo(env: Env, chatId: string): Promise<void> {
+  try {
+    const owner = await ownerChat(storeOf(env), env);
+    if (owner && owner !== chatId) {
+      await sendPlain(env, chatId, "Этот бот уже привязан к другому чату.");
+      return;
+    }
+    if (!owner) {
+      await sendPlain(env, chatId, "Напишите /start, чтобы привязать этот чат.");
+      return;
+    }
+    await sendPlain(env, chatId, "Собираю SEO-отчёт по petr-alekseev.ru.");
+    await pushSeoReport(env, chatId);
+  } catch (error) {
+    await sendPlain(env, chatId, `SEO-отчёт не собрался: ${errorText(error)}`).catch((sendError: unknown) => {
+      console.error(errorText(sendError));
+    });
+  }
+}
+
 async function sendWeeklySeo(env: Env): Promise<void> {
   if (!env.TELEGRAM_BOT_TOKEN) return;
   const store = storeOf(env);
@@ -68,8 +101,7 @@ async function sendWeeklySeo(env: Env): Promise<void> {
   const chatId = await ownerChat(store, env);
   if (!chatId || !shouldSendWeeklySeo(now, Boolean(await store.get(lock)))) return;
   try {
-    await sendTelegram(env.TELEGRAM_BOT_TOKEN, chatId, await inspectSite(fetch));
-    await sendTelegram(env.TELEGRAM_BOT_TOKEN, chatId, "SEO-отчёт доставлен.");
+    await pushSeoReport(env, chatId);
     await store.put(lock, now.toISOString(), 36 * 3600);
   } catch (error) {
     await tell(env, chatId, `SEO-отчёт не собрался: ${errorText(error)}`);
@@ -165,22 +197,6 @@ async function routeMessage(
     await deliver(env, true);
     return;
   }
-  if (command === "/seo") {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      const report = await Promise.race([
-        inspectSite(fetch),
-        new Promise<string>((_, reject) => {
-          timer = setTimeout(() => reject(new Error("проверка сайта не уложилась в 20 секунд")), 20_000);
-        }),
-      ]);
-      await send(report);
-      await send("SEO-отчёт доставлен.");
-    } finally {
-      if (timer) clearTimeout(timer);
-    }
-    return;
-  }
   await send("Не понял команду. Список команд: /help");
 }
 
@@ -188,7 +204,7 @@ export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     if (request.method === "GET" && url.pathname === "/health") {
-      return new Response("ok");
+      return new Response("ok seo-3");
     }
     if (request.method !== "POST" || url.pathname !== "/telegram") {
       return new Response("alekseev job bot");
@@ -199,8 +215,9 @@ export default {
     const update = (await request.json()) as TelegramUpdate;
     const text = update.message?.text?.trim() ?? "";
     const chatId = update.message?.chat?.id;
-    if (text && chatId !== undefined && commandFromText(text) === "/seo" && env.TELEGRAM_BOT_TOKEN) {
-      await tell(env, String(chatId), "Принял «SEO отчёт». Собираю данные по petr-alekseev.ru.");
+    if (text && chatId !== undefined && commandFromText(text) === "/seo") {
+      if (env.TELEGRAM_BOT_TOKEN) await deliverSeo(env, String(chatId));
+      return new Response("ok");
     }
     ctx.waitUntil(
       handleMessage(env, update).catch(async (error: unknown) => {

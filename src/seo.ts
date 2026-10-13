@@ -14,6 +14,7 @@ type PageFacts = {
   canonical: string;
   h1: string;
   metrikaGated: boolean;
+  tagsChecked: boolean;
   error: string;
 };
 
@@ -37,17 +38,72 @@ function sitemapUrls(xml: string): string[] {
   return [...xml.matchAll(/<loc>\s*([^<\s]+)\s*<\/loc>/gi)].map((match) => match[1]);
 }
 
-async function readUrl(fetchImpl: FetchLike, url: string): Promise<{ status: number; body: string; error: string }> {
+const PAGE_BYTES = 4_096;
+const HOME_BYTES = 12_288;
+const INSPECT_DEADLINE_MS = 8_000;
+
+function boundSignal(parent: AbortSignal, ms: number): { signal: AbortSignal; cancel: () => void } {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  const abort = () => controller.abort();
+  if (parent.aborted) controller.abort();
+  else parent.addEventListener("abort", abort);
+  return {
+    signal: controller.signal,
+    cancel: () => {
+      clearTimeout(timer);
+      parent.removeEventListener("abort", abort);
+    },
+  };
+}
+
+async function prefixText(response: Response, maxBytes: number): Promise<string> {
+  const reader = response.body?.getReader();
+  if (!reader) return "";
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (size < maxBytes) {
+      const { done, value } = await reader.read();
+      if (done || !value) break;
+      chunks.push(value);
+      size += value.byteLength;
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
+  const merged = new Uint8Array(Math.min(size, maxBytes));
+  let offset = 0;
+  for (const chunk of chunks) {
+    const take = Math.min(chunk.byteLength, merged.byteLength - offset);
+    if (take <= 0) break;
+    merged.set(chunk.subarray(0, take), offset);
+    offset += take;
+  }
+  return new TextDecoder("utf-8").decode(merged);
+}
+
+async function readPrefix(
+  fetchImpl: FetchLike,
+  url: string,
+  maxBytes: number,
+  parent: AbortSignal,
+): Promise<{ status: number; body: string; error: string }> {
+  const bound = boundSignal(parent, 5_000);
   try {
     const response = await fetchImpl(url, {
-      headers: { "User-Agent": USER_AGENT, Accept: "*/*" },
+      headers: { "User-Agent": USER_AGENT, Accept: "text/html,application/xml,text/plain,*/*" },
       redirect: "follow",
-      signal: AbortSignal.timeout(8_000),
+      signal: bound.signal,
     });
-    const body = (await response.text()).slice(0, 20_000);
+    const body = maxBytes > 0 ? await prefixText(response, maxBytes) : "";
+    if (maxBytes <= 0) await response.body?.cancel().catch(() => undefined);
     return { status: response.status, body, error: "" };
   } catch (error) {
-    return { status: 0, body: "", error: error instanceof Error ? error.message : String(error) };
+    const message = error instanceof Error ? error.message : String(error);
+    return { status: 0, body: "", error: parent.aborted ? "время вышло" : message.slice(0, 120) };
+  } finally {
+    bound.cancel();
   }
 }
 
@@ -65,7 +121,7 @@ async function mapPool<T, R>(items: T[], limit: number, fn: (item: T) => Promise
   return output;
 }
 
-function factsFrom(url: string, status: number, body: string, error: string): PageFacts {
+function factsFrom(url: string, status: number, body: string, error: string, tagsChecked = true): PageFacts {
   return {
     url,
     ok: status >= 200 && status < 300 && !error,
@@ -74,13 +130,15 @@ function factsFrom(url: string, status: number, body: string, error: string): Pa
     description: attr(body, "description"),
     canonical: attr(body, "canonical"),
     h1: textTag(body, "h1"),
-    metrikaGated: /initYandexMetrika|consent\.js/i.test(body) && !/mc\.yandex\.ru\/metrika\/tag\.js/i.test(body),
+    metrikaGated: false,
+    tagsChecked,
     error,
   };
 }
 
 function pageProblems(page: PageFacts): string[] {
   if (!page.ok) return [`${page.url} не открылась${page.error ? `: ${page.error}` : ` (${page.status || "нет ответа"})`}`];
+  if (!page.tagsChecked) return [];
   const missing = [
     page.title ? "" : "заголовок",
     page.description ? "" : "описание",
@@ -91,21 +149,44 @@ function pageProblems(page: PageFacts): string[] {
   return [`${page.url}: нет ${missing.join(", ")}`];
 }
 
-export async function inspectSite(fetchImpl: FetchLike, origin = SITE_ORIGIN): Promise<string> {
+function unfinishedReport(): string {
+  return [
+    `SEO-отчёт petr-alekseev.ru, ${formatMoscowDate(new Date())}`,
+    "",
+    "Проверка сайта не уложилась в 8 секунд, поэтому полный разбор оборван.",
+    "Итог: отчёт собран частично.",
+  ].join("\n");
+}
+
+function byteBudget(url: string, root: string): number {
+  try {
+    const path = new URL(url).pathname;
+    if (path === "/" || path.endsWith("/index.html")) return HOME_BYTES;
+  } catch {
+    if (url === root || url === `${root}/`) return HOME_BYTES;
+  }
+  return PAGE_BYTES;
+}
+
+async function collectSite(fetchImpl: FetchLike, origin: string, signal: AbortSignal): Promise<string> {
   const root = origin.replace(/\/$/, "");
-  const [robots, sitemap, home, www, indexHtml] = await Promise.all([
-    readUrl(fetchImpl, `${root}/robots.txt`),
-    readUrl(fetchImpl, `${root}/sitemap.xml`),
-    readUrl(fetchImpl, `${root}/`),
-    readUrl(fetchImpl, "https://www.petr-alekseev.ru/"),
-    readUrl(fetchImpl, `${root}/index.html`),
+  const host = new URL(root).host.replace(/^www\./, "");
+  const [robots, sitemap, www, indexHtml, consent] = await Promise.all([
+    readPrefix(fetchImpl, `${root}/robots.txt`, PAGE_BYTES, signal),
+    readPrefix(fetchImpl, `${root}/sitemap.xml`, 8_192, signal),
+    readPrefix(fetchImpl, `https://www.${host}/`, HOME_BYTES, signal),
+    readPrefix(fetchImpl, `${root}/index.html`, HOME_BYTES, signal),
+    readPrefix(fetchImpl, `${root}/assets/js/consent.js`, PAGE_BYTES, signal),
   ]);
-  const urls = sitemapUrls(sitemap.body).slice(0, 25);
-  const pages = await mapPool(urls, 4, async (url) => {
-    const loaded = await readUrl(fetchImpl, url);
+  if (signal.aborted) return unfinishedReport();
+  const urls = sitemapUrls(sitemap.body).slice(0, 20);
+  const pages = await mapPool(urls, 5, async (url) => {
+    const loaded = await readPrefix(fetchImpl, url, byteBudget(url, root), signal);
     return factsFrom(url, loaded.status, loaded.body, loaded.error);
   });
-  const homeFacts = factsFrom(`${root}/`, home.status, home.body, home.error);
+  const homeUrl = `${root}/`;
+  const homeFacts = pages.find((page) => page.url === homeUrl || page.url === root) ?? factsFrom(homeUrl, 0, "", "нет в карте сайта");
+  homeFacts.metrikaGated = /initYandexMetrika|loadMetrika/i.test(consent.body) && !/mc\.yandex\.ru\/metrika\/tag\.js/i.test(consent.body);
   return renderSeoReport({
     dateLabel: formatMoscowDate(new Date()),
     robotsOk: robots.status >= 200 && robots.status < 300 && /sitemap:/i.test(robots.body),
@@ -117,6 +198,23 @@ export async function inspectSite(fetchImpl: FetchLike, origin = SITE_ORIGIN): P
     indexStatus: indexHtml.status,
     indexCanonical: attr(indexHtml.body, "canonical"),
   });
+}
+
+export async function inspectSite(fetchImpl: FetchLike, origin = SITE_ORIGIN, deadlineMs = INSPECT_DEADLINE_MS): Promise<string> {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<string>((resolve) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      resolve(unfinishedReport());
+    }, deadlineMs);
+  });
+  const work = collectSite(fetchImpl, origin, controller.signal).catch(() => unfinishedReport());
+  try {
+    return await Promise.race([work, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 export function renderSeoReport(input: {

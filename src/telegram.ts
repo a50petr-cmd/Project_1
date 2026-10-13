@@ -72,19 +72,36 @@ export function commandFromText(text: string): string {
   return head;
 }
 
-export async function sendTelegram(token: string, chatId: string, text: string, fetchImpl: typeof fetch = fetch): Promise<void> {
+export async function sendTelegram(
+  token: string,
+  chatId: string,
+  text: string,
+  fetchImpl: typeof fetch = fetch,
+  mode: "html" | "plain" = "html",
+): Promise<void> {
   const payload = {
     chat_id: chatId,
     link_preview_options: { is_disabled: true },
     reply_markup: commandKeyboard,
   };
-  const response = await fetchImpl(`https://api.telegram.org/bot${token}/sendMessage`, {
+  const endpoint = `https://api.telegram.org/bot${token}/sendMessage`;
+  if (mode === "plain") {
+    const plain = await fetchImpl(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...payload, text }),
+    });
+    if (plain.ok) return;
+    const detail = (await plain.text()).replace(/\s+/g, " ").slice(0, 180);
+    throw new Error(`Telegram ${plain.status}${detail ? `: ${detail}` : ""}`);
+  }
+  const response = await fetchImpl(endpoint, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ ...payload, text, parse_mode: "HTML" }),
   });
   if (response.ok) return;
-  const plain = await fetchImpl(`https://api.telegram.org/bot${token}/sendMessage`, {
+  const plain = await fetchImpl(endpoint, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ ...payload, text: text.replace(/<[^>]+>/g, "") }),
