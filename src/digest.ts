@@ -2,10 +2,10 @@ import { formatMoscowDate, isWorkingDay } from "./calendar.ts";
 import { coverLetter } from "./letter.ts";
 import { scoreVacancy } from "./match.ts";
 import { profile } from "./profile.ts";
-import { findVacancies, seenKey, selectMatches, skipKey } from "./search.ts";
+import { findVacancies, seenKey, selectMatches } from "./search.ts";
 import type { FetchLike } from "./sources.ts";
-import { readSettings, writeSettings, type Settings, type Store } from "./store.ts";
-import { formatRunSummary, formatVacancyMessages } from "./telegram.ts";
+import { readSettings, writeBook, writeSettings, type Settings, type Store } from "./store.ts";
+import { formatSourceStatus, formatVacancyMessages } from "./telegram.ts";
 import type { Contacts, SourceReport } from "./types.ts";
 
 export type DigestResult = {
@@ -47,16 +47,16 @@ export async function runDigest(options: {
       store: options.store,
       now,
       periodDays: settings.periodDays,
-      enrichLimit: Math.max(settings.limit * 2, 12),
+      enrichLimit: Math.max(settings.limit, 8),
       superjobKey: options.superjobKey,
+      onReports: (reports) => options.send(formatSourceStatus(formatMoscowDate(now), reports)),
     });
 
     const timestamp = now.getTime();
+    const book = found.book;
     for (const vacancy of found.vacancies) {
       const scored = scoreVacancy(vacancy, timestamp);
-      if (!scored || scored.score < settings.minScore) {
-        await options.store.put(skipKey(vacancy.dedupeKey), "1", 30 * 86_400);
-      }
+      if (!scored || scored.score < settings.minScore) book[vacancy.dedupeKey] = "skip";
     }
 
     const chosen = selectMatches(found.vacancies, {
@@ -66,18 +66,20 @@ export async function runDigest(options: {
       limit: settings.limit,
     });
     const contacts = { telegram: profile.telegram, ...options.contacts };
-    await options.send(formatRunSummary(formatMoscowDate(now), found.reports, chosen.length));
+    if (chosen.length === 0) await options.send(`На ${formatMoscowDate(now)} новых подходящих вакансий нет.`);
     for (const vacancy of chosen) {
       const letter = coverLetter(vacancy, contacts);
       for (const message of formatVacancyMessages(vacancy, letter)) {
         await options.send(message);
       }
+      book[vacancy.dedupeKey] = "seen";
       await options.store.put(
         seenKey(vacancy.dedupeKey),
         JSON.stringify({ title: vacancy.title, url: vacancy.url, company: vacancy.company, letter, sentAt: now.toISOString() }),
         120 * 86_400,
       );
     }
+    await writeBook(options.store, book);
 
     const result: DigestResult = {
       status: chosen.length ? "sent" : "empty",

@@ -37,6 +37,26 @@ export async function writeSettings(store: Store, settings: Settings): Promise<v
   await store.put("settings", JSON.stringify(settings));
 }
 
+const BOOK_KEY = "book";
+
+export type Book = Record<string, "seen" | "skip">;
+
+export async function readBook(store: Store): Promise<Book> {
+  const raw = await store.get(BOOK_KEY);
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw) as Book;
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+export async function writeBook(store: Store, book: Book): Promise<void> {
+  const entries = Object.entries(book).slice(-400);
+  await store.put(BOOK_KEY, JSON.stringify(Object.fromEntries(entries)));
+}
+
 export function memoryStore(): Store {
   const values = new Map<string, string>();
   return {

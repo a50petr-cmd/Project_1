@@ -16,8 +16,8 @@ export function titleScore(title: string): number {
   else if (/операционн\p{L}*\s+деятельност/u.test(value) && /директор|руководител/.test(value)) score = 58;
   else if (/операционн\p{L}*\s+проект|проект\p{L}*\s+операционн|operations?\s+project/u.test(value)) score = 56;
   else if (/операционн/.test(value) && /руководител|директор|head|менеджер/.test(value)) score = 54;
-  else if (/проект/.test(value) && /менеджер|руководител|head|project manager/.test(value)) score = 50;
-  else if (/project manager|\bpm\b/.test(value)) score = 50;
+  else if (/руководител\p{L}*\s+направлен/u.test(value)) score = 52;
+  else if (/(?<![\p{L}])(менеджер\s+проект\p{L}*|руководител\p{L}*\s+проект\p{L}*|project manager|\bpm\b)/u.test(value)) score = 50;
   else if (/исполнительн\p{L}*\s+директор/u.test(value)) score = 36;
   else if (/управляющ\p{L}*\s+директор/u.test(value)) score = 34;
   else if (/директор\s+по\s+развитию/.test(value)) score = 30;
@@ -77,7 +77,12 @@ export function experienceScore(text: string): number {
 
 export function isAddedRole(title: string): boolean {
   const value = title.toLowerCase().replace(/ё/g, "е");
-  return /проект/.test(value) || /операционн\p{L}*\s+менеджер|operations manager/u.test(value);
+  return (
+    /(?<![\p{L}])(менеджер\s+проект|руководител\p{L}*\s+проект|project manager)/u.test(value) ||
+    /руководител\p{L}*\s+направлен/u.test(value) ||
+    /операционн\p{L}*\s+менеджер|operations manager/u.test(value) ||
+    /операционн\p{L}*\s+проект|проект\p{L}*\s+операционн/u.test(value)
+  );
 }
 
 const CLOSE_INDUSTRY = /розниц|ритейл|fmcg|e-?com|e-?grocery|логист|оптов|франчайз|франшиз|доставк|маркетплейс|дистриб|продукт\p{L}*\s+питан/iu;

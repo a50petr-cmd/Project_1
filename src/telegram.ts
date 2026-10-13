@@ -23,6 +23,15 @@ export function formatVacancyMessages(vacancy: ScoredVacancy, letter: string): s
   return [head, ...splitText(body, 3900)];
 }
 
+export function formatSourceStatus(dateLabel: string, reports: SourceReport[]): string {
+  const lines = reports.map((report) => {
+    const state = report.ok ? String(report.count) : `ошибка${report.error ? `: ${report.error}` : ""}`;
+    const note = report.ok && report.error ? ` (${report.error})` : "";
+    return `${report.source}: ${state}${note}`;
+  });
+  return [`Отчёт на ${dateLabel}.`, "", ...lines].join("\n");
+}
+
 export function formatRunSummary(dateLabel: string, reports: SourceReport[], sent: number): string {
   const lines = reports.map((report) => {
     const state = report.ok ? String(report.count) : `ошибка${report.error ? `: ${report.error}` : ""}`;
@@ -99,7 +108,7 @@ export async function publishCommands(token: string, fetchImpl: typeof fetch = f
 }
 
 export const helpText = [
-  "Ищу по всей России операционного директора, операционного менеджера, менеджера проектов и менеджера операционных проектов. К каждой вакансии готовлю письмо по резюме Петра Алексеева.",
+  "Ищу по всей России операционного директора, операционного менеджера, руководителя направления, менеджера проекта и руководителя операционных проектов. К каждой вакансии пишу отдельное письмо по резюме Петра Алексеева.",
   "",
   "Команды:",
   "/search — найти вакансии сейчас",

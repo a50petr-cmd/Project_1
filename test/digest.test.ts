@@ -51,6 +51,9 @@ test("digest sends one letter and does not repeat it", async () => {
   });
   assert.equal(first.status, "sent");
   assert.equal(first.sent, 1);
+  const reportAt = sent.findIndex((text) => text.startsWith("Отчёт"));
+  const letterAt = sent.findIndex((text) => text.includes("X5 Group"));
+  assert.ok(reportAt !== -1 && letterAt !== -1 && reportAt < letterAt);
   assert.ok(sent.some((text) => text.includes("Север Импорт") && text.includes("X5 Group")));
 
   const again = await runDigest({

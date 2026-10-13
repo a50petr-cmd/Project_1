@@ -14,7 +14,7 @@ export async function fetchText(fetchImpl: FetchLike, url: string, headers: Reco
       ...headers,
     },
     redirect: "follow",
-    signal: AbortSignal.timeout(20_000),
+    signal: AbortSignal.timeout(12_000),
   });
   if (!response.ok) throw new Error(`${response.status} ${new URL(url).host}`);
   return response.text();
@@ -63,6 +63,18 @@ function rssUrl(origin: string, query: BoardQuery): string {
   return url.toString();
 }
 
+async function runPool<T>(items: T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> {
+  let cursor = 0;
+  async function worker(): Promise<void> {
+    while (cursor < items.length) {
+      const index = cursor;
+      cursor += 1;
+      await fn(items[index]);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, () => worker()));
+}
+
 async function readBoard(
   fetchImpl: FetchLike,
   source: SourceId,
@@ -71,14 +83,14 @@ async function readBoard(
 ): Promise<{ report: SourceReport; vacancies: Vacancy[] }> {
   const vacancies: Vacancy[] = [];
   const errors: string[] = [];
-  for (const query of queries) {
+  await runPool(queries, 3, async (query) => {
     try {
       const xml = await fetchText(fetchImpl, rssUrl(origin, query));
       for (const item of parseRssItems(xml)) vacancies.push(boardVacancy(source, origin, item));
     } catch (error) {
       errors.push(error instanceof Error ? error.message : String(error));
     }
-  }
+  });
   return {
     report: {
       source: source === "hh" ? "hh.ru" : "Зарплата.ру",
@@ -103,27 +115,17 @@ function russiaQuery(text: string, experience: string | null): BoardQuery {
   return { text, area: RUSSIA, remote: false, experience };
 }
 
+const LEADERSHIP =
+  'операционный директор OR COO OR "директор по операционной деятельности" OR "Head of Operations"';
+const PROJECTS =
+  '"операционный менеджер" OR "руководитель операционных проектов" OR "менеджер операционных проектов" OR "менеджер проекта" OR "менеджер проектов" OR "руководитель проектов" OR "руководитель направления"';
+
 export function hhQueries(): BoardQuery[] {
-  return [
-    russiaQuery("операционный директор", "moreThan6"),
-    russiaQuery("COO", "moreThan6"),
-    russiaQuery("директор по операционной деятельности", "moreThan6"),
-    russiaQuery("Head of Operations", "moreThan6"),
-    russiaQuery("операционный менеджер", null),
-    russiaQuery("менеджер операционных проектов", null),
-    russiaQuery("руководитель операционных проектов", null),
-    russiaQuery("менеджер проектов", null),
-    russiaQuery("руководитель проектов", null),
-  ];
+  return [russiaQuery(LEADERSHIP, "moreThan6"), russiaQuery(PROJECTS, null)];
 }
 
 export function zarplataQueries(): BoardQuery[] {
-  return [
-    russiaQuery("операционный директор", "moreThan6"),
-    russiaQuery("операционный менеджер", null),
-    russiaQuery("менеджер операционных проектов", null),
-    russiaQuery("менеджер проектов", null),
-  ];
+  return [russiaQuery(LEADERSHIP, "moreThan6"), russiaQuery(PROJECTS, null)];
 }
 
 export async function searchHh(fetchImpl: FetchLike): Promise<{ report: SourceReport; vacancies: Vacancy[] }> {
@@ -171,12 +173,12 @@ export function mapTrudVacancy(raw: TrudVacancy): Vacancy | null {
   };
 }
 
-const TRUD_QUERIES = ["операционный директор", "менеджер операционных проектов", "менеджер проектов"];
+const TRUD_QUERIES = ["операционный директор", "руководитель операционных проектов", "менеджер проекта", "руководитель направления"];
 
 export async function searchTrudvsem(fetchImpl: FetchLike): Promise<{ report: SourceReport; vacancies: Vacancy[] }> {
   const vacancies: Vacancy[] = [];
   const errors: string[] = [];
-  for (const text of TRUD_QUERIES) {
+  await runPool(TRUD_QUERIES, 3, async (text) => {
     const url = new URL("https://opendata.trudvsem.ru/api/v1/vacancies");
     url.searchParams.set("text", text);
     url.searchParams.set("offset", "0");
@@ -192,7 +194,7 @@ export async function searchTrudvsem(fetchImpl: FetchLike): Promise<{ report: So
     } catch (error) {
       errors.push(error instanceof Error ? error.message : String(error));
     }
-  }
+  });
   return {
     report: {
       source: "Работа России",
@@ -240,8 +242,8 @@ export function mapHabrCard(card: HabrCard): Vacancy | null {
 export async function searchHabr(fetchImpl: FetchLike): Promise<{ report: SourceReport; vacancies: Vacancy[] }> {
   const vacancies: Vacancy[] = [];
   const errors: string[] = [];
-  const queries = ["операционный директор", "менеджер проектов", "менеджер операционных проектов"];
-  for (const query of queries) {
+  const queries = ["операционный директор", "менеджер проекта", "руководитель направления", "руководитель операционных проектов"];
+  await runPool(queries, 3, async (query) => {
     const url = new URL("https://career.habr.com/vacancies");
     url.searchParams.set("q", query);
     url.searchParams.set("type", "all");
@@ -257,7 +259,7 @@ export async function searchHabr(fetchImpl: FetchLike): Promise<{ report: Source
     } catch (error) {
       errors.push(error instanceof Error ? error.message : String(error));
     }
-  }
+  });
   return {
     report: { source: "Хабр Карьера", ok: errors.length < queries.length, count: vacancies.length, error: errors[0] },
     vacancies,
@@ -312,10 +314,10 @@ export async function searchSuperjob(fetchImpl: FetchLike, apiKey: string | unde
   if (!apiKey) {
     return { report: { source: "SuperJob", ok: true, count: 0, error: "ключ API не задан" }, vacancies: [] };
   }
-  const keywords = ["операционный директор", "менеджер проектов", "менеджер операционных проектов"];
+  const keywords = ["операционный директор", "руководитель направления", "менеджер проекта", "руководитель операционных проектов"];
   const vacancies: Vacancy[] = [];
   const errors: string[] = [];
-  for (const keyword of keywords) {
+  await runPool(keywords, 3, async (keyword) => {
     const url = new URL("https://api.superjob.ru/2.0/vacancies/");
     url.searchParams.set("keyword", keyword);
     url.searchParams.set("count", "20");
@@ -329,7 +331,7 @@ export async function searchSuperjob(fetchImpl: FetchLike, apiKey: string | unde
     } catch (error) {
       errors.push(error instanceof Error ? error.message : String(error));
     }
-  }
+  });
   return {
     report: { source: "SuperJob", ok: errors.length < keywords.length, count: vacancies.length, error: errors[0] },
     vacancies,

@@ -66,7 +66,7 @@ export const achievements: Achievement[] = [
 export const themePatterns: Record<Theme, RegExp> = {
   import: /импорт|вэд|поставк|закуп|порт|сырь|логист|склад|тамож/i,
   ecommerce: /e-?com|интернет-магазин|маркетплейс|онлайн|цифров|gmv|конверси/i,
-  franchise: /франчайз|франшиз|рознич|ритейл|fmcg|магазин/i,
+  franchise: /франчайз|франшиз|рознич|ритейл|fmcg|(?<!интернет-)магазин/i,
   darkstore: /даркстор|быстр\p{L}*\s+доставк|e-?grocery|доставк|курьер/iu,
   b2b: /b2b|оптов|horeca|корпоративн\p{L}*\s+клиент/iu,
   pnl: /p&l|ebitda|прибыл|маржинал|бюджет|себестоим|выручк|unit|затрат|списан|оборот/i,

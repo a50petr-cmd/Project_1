@@ -31,7 +31,11 @@ test("title score prefers COO and drops junior roles", () => {
   assert.ok(titleScore("Менеджер операционных проектов") >= 56);
   assert.ok(titleScore("Операционный менеджер") >= 54);
   assert.ok(titleScore("Менеджер проектов") >= 50);
+  assert.ok(titleScore("Менеджер проекта") >= 50);
   assert.ok(titleScore("Руководитель проектов") >= 50);
+  assert.ok(titleScore("Руководитель операционных проектов") >= 56);
+  assert.ok(titleScore("Руководитель направления") >= 52);
+  assert.ok(titleScore("Менеджер по продажам и реализации проектов") < 30);
   assert.ok(titleScore("Менеджер IT-проектов") <= 16);
   assert.equal(titleScore("Помощник операционного директора"), 0);
   assert.equal(titleScore("Курьер"), 0);
@@ -112,13 +116,29 @@ test("drops a project role in a distant industry", () => {
   assert.equal(ranked.length, 0);
 });
 
+test("keeps a head of direction vacancy outside Moscow", () => {
+  const ranked = rankVacancies(
+    [
+      vacancy({
+        title: "Руководитель направления",
+        city: "Казань",
+        region: "Татарстан",
+        workFormat: "на месте работодателя",
+        description: "Развитие направления.",
+      }),
+    ],
+    { now, periodDays: 14, minScore: 78, limit: 5 },
+  );
+  assert.equal(ranked.length, 1);
+});
+
 test("search queries cover project roles across Russia", () => {
-  const queries = [...hhQueries(), ...zarplataQueries()];
-  const texts = queries.map((query) => query.text);
-  assert.ok(texts.includes("менеджер проектов"));
-  assert.ok(texts.includes("менеджер операционных проектов"));
-  assert.ok(texts.includes("операционный менеджер"));
-  assert.ok(queries.every((query) => query.area === "113" && query.remote === false));
+  const blob = [...hhQueries(), ...zarplataQueries()].map((query) => query.text).join("\n");
+  assert.match(blob, /менеджер проекта/);
+  assert.match(blob, /руководитель операционных проектов/);
+  assert.match(blob, /руководитель направления/);
+  assert.match(blob, /операционный менеджер/);
+  assert.ok([...hhQueries(), ...zarplataQueries()].every((query) => query.area === "113" && query.remote === false));
 });
 
 test("enrichment keeps room for project roles", () => {

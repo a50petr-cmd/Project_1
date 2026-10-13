@@ -1,6 +1,6 @@
 import { isAddedRole, isRecent, rankVacancies, titleScore } from "./match.ts";
 import { enrichVacancy, searchHabr, searchHh, searchSuperjob, searchTrudvsem, searchZarplata, type FetchLike } from "./sources.ts";
-import type { Store } from "./store.ts";
+import { readBook, type Book, type Store } from "./store.ts";
 import { normalizeKey } from "./text.ts";
 import type { ScoredVacancy, SourceId, SourceReport, Vacancy } from "./types.ts";
 
@@ -69,7 +69,8 @@ export async function findVacancies(options: {
   periodDays: number;
   enrichLimit: number;
   superjobKey?: string;
-}): Promise<{ reports: SourceReport[]; vacancies: Vacancy[] }> {
+  onReports?: (reports: SourceReport[]) => Promise<void>;
+}): Promise<{ reports: SourceReport[]; vacancies: Vacancy[]; book: Book }> {
   const batches = await Promise.all([
     searchHh(options.fetch),
     searchZarplata(options.fetch),
@@ -78,26 +79,17 @@ export async function findVacancies(options: {
     searchSuperjob(options.fetch, options.superjobKey),
   ]);
   const reports = batches.map((batch) => batch.report);
+  if (options.onReports) await options.onReports(reports);
   const now = options.now.getTime();
+  const book = options.store ? await readBook(options.store) : {};
   let vacancies = dedupeVacancies(batches.flatMap((batch) => batch.vacancies))
     .filter((vacancy) => titleScore(vacancy.title) >= 26)
     .filter((vacancy) => isRecent(vacancy.publishedAt, now, options.periodDays))
+    .filter((vacancy) => !book[vacancy.dedupeKey])
     .sort((a, b) => titleScore(b.title) - titleScore(a.title) || Date.parse(b.publishedAt) - Date.parse(a.publishedAt));
 
-  if (options.store) {
-    const unseen: Vacancy[] = [];
-    for (const vacancy of vacancies) {
-      const [seen, skipped] = await Promise.all([
-        options.store.get(seenKey(vacancy.dedupeKey)),
-        options.store.get(skipKey(vacancy.dedupeKey)),
-      ]);
-      if (!seen && !skipped) unseen.push(vacancy);
-    }
-    vacancies = unseen;
-  }
-
   const enriched = await mapPool(pickForEnrich(vacancies, options.enrichLimit), 3, (vacancy) => enrichVacancy(options.fetch, vacancy));
-  return { reports, vacancies: enriched };
+  return { reports, vacancies: enriched, book };
 }
 
 export function pickForEnrich(vacancies: Vacancy[], limit: number): Vacancy[] {

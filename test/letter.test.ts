@@ -25,6 +25,8 @@ test("letter is short, names the vacancy, and keeps a real result", () => {
   const letter = coverLetter(vacancy, { telegram: "https://t.me/PetroAlekseev" });
   assert.match(letter, /Север Импорт/);
   assert.match(letter, /Операционный директор \(COO\)/);
+  assert.match(letter, /Операционный контур/);
+  assert.match(letter, /По поставкам/);
   assert.match(letter, /X5 Group/);
   assert.match(letter, /10–15%/);
   assert.match(letter, /t\.me\/PetroAlekseev/);
@@ -49,6 +51,7 @@ test("letter for a store launch outside Moscow uses that experience", () => {
     },
     { telegram: "https://t.me/PetroAlekseev" },
   );
+  assert.match(letter, /Направление|Проект|розниц/);
   assert.match(letter, /Фасоль|Пятёрочка/);
   assert.match(letter, /командировк/);
   assert.doesNotMatch(letter, /Переезд не рассматриваю/);
