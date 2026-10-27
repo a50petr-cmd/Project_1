@@ -13,7 +13,7 @@ export type Settings = {
 
 export const defaultSettings: Settings = {
   enabled: true,
-  limit: 5,
+  limit: 3,
   periodDays: 14,
   minScore: 78,
   minSalary: 0,

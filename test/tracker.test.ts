@@ -78,3 +78,11 @@ test("a card that lost its record is rebuilt from the message text", async () =>
   assert.equal((await readApps(store))[0].status, "applied");
   assert.equal(cardToRecord("просто текст", [], "x", new Date()), null);
 });
+
+test("director roles go to the COO resume, the rest to the projects resume", async () => {
+  const { resumeTrack } = await import("../src/match.ts");
+  assert.equal(resumeTrack("Операционный директор (COO)"), "coo");
+  assert.equal(resumeTrack("Head of Operations"), "coo");
+  assert.equal(resumeTrack("Руководитель операционных проектов"), "projects");
+  assert.equal(resumeTrack("Руководитель франчайзинга"), "projects");
+});

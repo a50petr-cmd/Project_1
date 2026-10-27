@@ -17,7 +17,8 @@ binding = "JOBS"
 id = "replace-with-kv-namespace-id"
 
 [vars]
-DIGEST_LIMIT = "5"
+# Вакансий в день на каждое резюме (COO и операционные проекты).
+DIGEST_LIMIT = "3"
 SEARCH_PERIOD_DAYS = "14"
 MIN_SCORE = "78"
 # 0 — не фильтровать по зарплате; иначе минимум «на руки» в рублях.

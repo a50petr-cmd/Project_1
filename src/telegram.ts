@@ -50,13 +50,14 @@ export function reminderButtons(id: string): InlineMarkup {
 
 export const emptyMarkup: InlineMarkup = { inline_keyboard: [] };
 
-export function formatVacancyCard(vacancy: ScoredVacancy, why: string, group: string): string {
+export function formatVacancyCard(vacancy: ScoredVacancy, why: string, group: string, resume = ""): string {
   const place = [vacancy.company, vacancy.city || vacancy.region, SOURCE_LABEL[vacancy.source]].filter(Boolean);
   const lines = [`<b>${escapeHtml(vacancy.title)}</b>`, escapeHtml(place.join(" · "))];
   if (vacancy.salary) lines.push(`💰 ${escapeHtml(vacancy.salary)}`);
   const workFormat = vacancy.workFormat.replace(/<[^>]*>?/g, " ").replace(/\s+/g, " ").trim();
   if (workFormat && !workFormat.includes("<")) lines.push(escapeHtml(`Формат: ${workFormat}`));
   lines.push(`Роль: ${escapeHtml(group)}`);
+  if (resume) lines.push(`📄 Откликаться: <b>${escapeHtml(resume)}</b>`);
   if (why) lines.push(`Почему подходит: ${escapeHtml(why)}`);
   lines.push(`<a href="${escapeHtml(vacancy.url)}">Открыть вакансию</a>`);
   lines.push("", "Письмо — следующим сообщением: зажмите его → «Копировать» → вставьте в отклик на hh.");
@@ -162,7 +163,7 @@ export async function publishCommands(token: string, fetchImpl: typeof fetch = f
 export const helpText = [
   "Ищу по всей России вакансии под резюме Петра Алексеева: операционный директор, операционные проекты, руководитель направления, франчайзинг и развитие сети, e-commerce и доставка, B2B.",
   "",
-  "По рабочим дням в 10:00 мск присылаю до 5 новых вакансий. На каждую — два сообщения:",
+  "По рабочим дням в 10:00 мск присылаю до 3 новых вакансий под каждое резюме: под «Операционного директора (COO)» и под «Руководителя операционных проектов». В карточке написано, каким резюме откликаться. На каждую вакансию — два сообщения:",
   "1) карточка с кнопками;",
   "2) только текст письма: зажмите его → «Копировать» → вставьте в отклик на hh.",
   "",

@@ -195,3 +195,19 @@ export function roleGroup(title: string): string {
   if (/операционн/.test(value)) return "Операционный менеджер";
   return "Другое";
 }
+
+// С каким резюме откликаться: директорские роли — резюме COO, остальные — «Руководитель операционных проектов».
+export type ResumeTrack = "coo" | "projects";
+
+export const RESUME_LABEL: Record<ResumeTrack, string> = {
+  coo: "Резюме 1 — Операционный директор (COO)",
+  projects: "Резюме 2 — Руководитель операционных проектов",
+};
+
+export function resumeTrack(title: string): ResumeTrack {
+  const value = title.toLowerCase().replace(/ё/g, "е");
+  if (/\bcoo\b|chief operating|head of operations|операционн\p{L}*\s+директор|директор\s+по\s+операционн|исполнительн\p{L}*\s+директор|директор\s+по\s+развитию\s+сет/u.test(value)) {
+    return "coo";
+  }
+  return "projects";
+}

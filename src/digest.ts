@@ -1,6 +1,6 @@
 import { formatMoscowDate, isWorkingDay } from "./calendar.ts";
-import { dominantThemes, writeLetter, type AiLike } from "./letter.ts";
-import { roleGroup, scoreVacancy } from "./match.ts";
+import { dominantThemes, pickPairs, writeLetter, type AiLike } from "./letter.ts";
+import { RESUME_LABEL, resumeTrack, roleGroup, scoreVacancy } from "./match.ts";
 import { profile } from "./profile.ts";
 import { findVacancies, selectMatches } from "./search.ts";
 import type { FetchLike } from "./sources.ts";
@@ -68,7 +68,7 @@ export async function runDigest(options: {
       store: options.store,
       now,
       periodDays: settings.periodDays,
-      enrichLimit: Math.max(settings.limit, 8),
+      enrichLimit: Math.max(settings.limit * 2 + 4, 10),
       superjobKey: options.superjobKey,
       minSalary: settings.minSalary,
       onReports: (reports) => options.send(formatSourceStatus(formatMoscowDate(now), reports)),
@@ -81,18 +81,24 @@ export async function runDigest(options: {
       if (!scored || scored.score < settings.minScore) book[vacancy.dedupeKey] = "skip";
     }
 
-    const chosen = selectMatches(found.vacancies, {
+    // Лимит — на каждое резюме: до N вакансий под COO и до N под «Руководителя операционных проектов».
+    const ranked = selectMatches(found.vacancies, {
       now: timestamp,
       periodDays: settings.periodDays,
       minScore: settings.minScore,
-      limit: settings.limit,
+      limit: 1_000,
       minSalary: settings.minSalary,
     });
+    const chosen = [
+      ...ranked.filter((vacancy) => resumeTrack(vacancy.title) === "coo").slice(0, settings.limit),
+      ...ranked.filter((vacancy) => resumeTrack(vacancy.title) === "projects").slice(0, settings.limit),
+    ];
     if (chosen.length === 0) await options.send(`На ${formatMoscowDate(now)} новых подходящих вакансий нет.`);
     // Письма пишем параллельно, а учёт сохраняем ДО отправки карточек:
     // ручной поиск Cloudflare обрывает примерно через 30 секунд, и кнопки должны работать,
     // даже если подборка оборвалась на середине.
-    const letters = await Promise.all(chosen.map((vacancy) => writeLetter(vacancy, { ai: options.ai })));
+    const pairs = pickPairs(chosen);
+    const letters = await Promise.all(chosen.map((vacancy, index) => writeLetter(vacancy, { ai: options.ai, pair: pairs[index] })));
     const tracked = chosen.map((vacancy, index): { record: AppRecord; details: AppDetails } => ({
       record: {
         id: shortId(vacancy.dedupeKey),
@@ -111,7 +117,8 @@ export async function runDigest(options: {
 
     for (const [index, vacancy] of chosen.entries()) {
       const { record } = tracked[index];
-      await options.send(formatVacancyCard(vacancy, whyLine(vacancy), record.group), { markup: newVacancyButtons(record.id) });
+      const resume = RESUME_LABEL[resumeTrack(vacancy.title)];
+      await options.send(formatVacancyCard(vacancy, whyLine(vacancy), record.group, resume), { markup: newVacancyButtons(record.id) });
       await options.send(letters[index].text, { plain: true });
     }
 

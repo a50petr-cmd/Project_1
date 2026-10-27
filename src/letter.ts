@@ -32,7 +32,7 @@ function titleThemes(title: string): Theme[] {
   return (Object.keys(themePatterns) as Theme[]).filter((theme) => themePatterns[theme].test(title));
 }
 
-export function selectAchievements(vacancy: Pick<ScoredVacancy, "title" | "description" | "workFormat">, shift = 0): Achievement[] {
+export function rankAchievements(vacancy: Pick<ScoredVacancy, "title" | "description" | "workFormat">): Achievement[] {
   const themes = dominantThemes(vacancy);
   const fromTitle = titleThemes(vacancy.title);
   const ranked = achievements
@@ -46,8 +46,26 @@ export function selectAchievements(vacancy: Pick<ScoredVacancy, "title" | "descr
     }))
     .sort((a, b) => b.score - a.score || a.index - b.index)
     .map((entry) => entry.item);
+  return ranked;
+}
+
+export function selectAchievements(vacancy: Pick<ScoredVacancy, "title" | "description" | "workFormat">, shift = 0): Achievement[] {
+  const ranked = rankAchievements(vacancy);
   const start = shift % Math.max(1, ranked.length - 1);
   return ranked.slice(start, start + 2);
+}
+
+// Пары «первый результат + второй» для подборки: у соседних писем разное начало.
+export function pickPairs(vacancies: Array<Pick<ScoredVacancy, "title" | "description" | "workFormat">>): Achievement[][] {
+  const usedLeads = new Map<string, number>();
+  return vacancies.map((vacancy) => {
+    const ranked = rankAchievements(vacancy);
+    const top = ranked.slice(0, 3);
+    const lead = [...top].sort((a, b) => (usedLeads.get(a.id) ?? 0) - (usedLeads.get(b.id) ?? 0))[0] ?? ranked[0];
+    usedLeads.set(lead.id, (usedLeads.get(lead.id) ?? 0) + 1);
+    const extra = ranked.find((item) => item.id !== lead.id);
+    return extra ? [lead, extra] : [lead];
+  });
 }
 
 const TASK_BY_THEME: Record<Theme, string> = {
@@ -76,8 +94,8 @@ function locationLine(vacancy: ScoredVacancy): string {
   return "Живу в Подмосковье, к командировкам готов.";
 }
 
-export function templateLetter(vacancy: ScoredVacancy, shift = 0): string {
-  const [lead, extra] = selectAchievements(vacancy, shift);
+export function templateLetter(vacancy: ScoredVacancy, shift = 0, pair?: Achievement[]): string {
+  const [lead, extra] = pair ?? selectAchievements(vacancy, shift);
   return [
     lead?.text ?? "",
     taskLine(vacancy),
@@ -97,7 +115,7 @@ function lowerFirst(text: string): string {
 const SYSTEM_PROMPT = `Ты пишешь сопроводительное письмо к отклику на hh.ru от имени Петра Алексеева. Так пишет занятой опытный руководитель коллеге: коротко, прямо, без канцелярита и без самовосхваления.
 
 Структура — три коротких абзаца через пустую строку, потом подпись:
-1. Одна фраза: самый близкий к вакансии результат Петра с цифрой из фактов. Начинай сразу с дела: «В X5 вёл…», «В Комусе с нуля запустил…».
+1. Одна фраза: результат, который указан в задании как первый, с его цифрой. Начинай сразу с дела и с названия компании: «В Комусе с нуля запустил…», «В METRO открыл…».
 2. Одна-две фразы: какую задачу компании ты видишь в вакансии и второй результат с цифрой, который это подтверждает.
 3. Одна фраза: «Готов рассказать подробнее — когда удобно созвониться?» или похожая простая фраза.
 Подпись: Пётр Алексеев
@@ -121,7 +139,7 @@ const SYSTEM_PROMPT = `Ты пишешь сопроводительное пис
 
 Верни только текст письма.`;
 
-function userPrompt(vacancy: ScoredVacancy, avoid?: string): string {
+function userPrompt(vacancy: ScoredVacancy, pair: Achievement[], avoid?: string): string {
   const description = vacancy.description.replace(/\s+/g, " ").slice(0, 3_000);
   return [
     `Факты из резюме:\n${resumeFacts}`,
@@ -131,6 +149,9 @@ function userPrompt(vacancy: ScoredVacancy, avoid?: string): string {
     vacancy.city ? `Город: ${vacancy.city}` : "",
     vacancy.workFormat ? `Формат: ${vacancy.workFormat}` : "",
     description ? `Текст вакансии: ${description}` : "Текста вакансии нет — опирайся на название.",
+    "",
+    `Первый абзац — ОБЯЗАТЕЛЬНО про этот результат (перескажи своими словами, цифры сохрани): ${pair[0]?.text ?? ""}`,
+    pair[1] ? `Второй результат во втором абзаце: ${pair[1].text}` : "",
     avoid ? `\nПрошлый вариант письма не понравился, напиши заметно иначе, начни с другого результата:\n${avoid}` : "",
   ]
     .filter(Boolean)
@@ -151,7 +172,8 @@ export function cleanAiLetter(raw: string): string {
 }
 
 // Возвращает причину, по которой письмо ИИ нельзя отправлять, или null.
-export function rejectAiLetter(letter: string, vacancy: ScoredVacancy): string | null {
+export function rejectAiLetter(letter: string, vacancy: ScoredVacancy, lead?: Achievement): string | null {
+  if (lead && !lead.marker.test(letter.slice(0, 160))) return `начало не с результата ${lead.id}`;
   if (letter.length < 200) return "слишком короткое";
   if (letter.length > 800) return "слишком длинное";
   if (/меня зовут|хочу откликнуться|ваша вакансия меня заинтересовала/i.test(letter.slice(0, 120))) return "шаблонное начало";
@@ -166,9 +188,10 @@ export function rejectAiLetter(letter: string, vacancy: ScoredVacancy): string |
 
 export async function writeLetter(
   vacancy: ScoredVacancy,
-  options: { ai?: AiLike; avoid?: string; shift?: number } = {},
+  options: { ai?: AiLike; avoid?: string; shift?: number; pair?: Achievement[] } = {},
 ): Promise<LetterResult> {
-  const fallback = (): LetterResult => ({ text: templateLetter(vacancy, options.shift ?? 0), by: "template" });
+  const pair = options.pair ?? selectAchievements(vacancy, options.shift ?? 0);
+  const fallback = (): LetterResult => ({ text: templateLetter(vacancy, 0, pair), by: "template" });
   if (!options.ai) return fallback();
   try {
     // Не ждём ИИ дольше 15 секунд: иначе подборку оборвёт лимит времени Cloudflare.
@@ -176,7 +199,7 @@ export async function writeLetter(
       options.ai.run(AI_MODEL, {
         messages: [
           { role: "system", content: SYSTEM_PROMPT },
-          { role: "user", content: userPrompt(vacancy, options.avoid) },
+          { role: "user", content: userPrompt(vacancy, pair, options.avoid) },
         ],
         max_tokens: 500,
         temperature: options.avoid ? 0.8 : 0.4,
@@ -185,7 +208,7 @@ export async function writeLetter(
     ])) as { response?: unknown };
     const raw = typeof output?.response === "string" ? output.response : "";
     const letter = cleanAiLetter(raw);
-    const problem = rejectAiLetter(letter, vacancy);
+    const problem = rejectAiLetter(letter, vacancy, pair[0]);
     if (problem) {
       console.warn(`AI letter rejected: ${problem}`);
       return fallback();

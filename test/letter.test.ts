@@ -81,3 +81,19 @@ test("AI letter with bureaucratic phrases falls back to the template", async () 
   const result = await writeLetter(vacancy, { ai: fakeAi(text) });
   assert.equal(result.by, "template");
 });
+
+test("letters in one batch open with different results", async () => {
+  const { pickPairs } = await import("../src/letter.ts");
+  const franchise = { ...vacancy, title: "Руководитель франчайзинга", description: "Франчайзинг, открытие магазинов, логистика, импорт" };
+  const pairs = pickPairs([franchise, franchise, franchise]);
+  const leads = pairs.map((pair) => pair[0].id);
+  assert.equal(new Set(leads).size, 3);
+});
+
+test("AI letter that opens with a different result than asked falls back", async () => {
+  const { rankAchievements } = await import("../src/letter.ts");
+  const komus = rankAchievements({ ...vacancy, title: "Руководитель e-grocery", description: "доставка, онлайн" })[0];
+  const result = await writeLetter(vacancy, { ai: fakeAi(goodAi), pair: [komus] });
+  assert.equal(result.by, "template");
+  assert.match(result.text.split("\n")[0], /Комус/);
+});
