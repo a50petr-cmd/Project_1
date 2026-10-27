@@ -1,0 +1,152 @@
+import { formatMoscowDate, isWorkingDay } from "./calendar.ts";
+import { dominantThemes, pickPairs, writeLetter, type AiLike } from "./letter.ts";
+import { RESUME_LABEL, resumeTrack, roleGroup, scoreVacancy } from "./match.ts";
+import { profile } from "./profile.ts";
+import { findVacancies, selectMatches } from "./search.ts";
+import type { FetchLike } from "./sources.ts";
+import { readSettings, writeBook, writeSettings, type Settings, type Store } from "./store.ts";
+import { formatSourceStatus, formatVacancyCard, newVacancyButtons, type InlineMarkup } from "./telegram.ts";
+import type { Theme } from "./profile.ts";
+import { addApps, shortId, type AppDetails, type AppRecord } from "./tracker.ts";
+import type { ScoredVacancy, SourceReport } from "./types.ts";
+
+export type Send = (text: string, extra?: { markup?: InlineMarkup; plain?: boolean }) => Promise<void>;
+
+const THEME_LABEL: Record<Theme, string> = {
+  import: "импорт и логистика",
+  ecommerce: "онлайн-продажи",
+  franchise: "розница и франчайзинг",
+  darkstore: "доставка",
+  b2b: "B2B и опт",
+  pnl: "P&L и затраты",
+  team: "процессы и команда",
+  projects: "запуски проектов",
+};
+
+export function whyLine(vacancy: ScoredVacancy): string {
+  const themes = dominantThemes(vacancy).slice(0, 4);
+  if (themes.length === 0) return "";
+  return `в вакансии ${themes.map((theme) => THEME_LABEL[theme]).join(", ")} — это есть в вашем опыте.`;
+}
+
+export type DigestResult = {
+  status: "sent" | "empty" | "skipped" | "failed";
+  reason?: string;
+  sent: number;
+  reports: SourceReport[];
+};
+
+export async function runDigest(options: {
+  store: Store;
+  fetch: FetchLike;
+  send: Send;
+  ai?: AiLike;
+  now?: Date;
+  force?: boolean;
+  superjobKey?: string;
+  settingsOverride?: Partial<Settings>;
+}): Promise<DigestResult> {
+  const now = options.now ?? new Date();
+  const settings = { ...(await readSettings(options.store)), ...options.settingsOverride };
+  const day = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Moscow" }).format(now);
+  const lockKey = `digest-lock:${day}`;
+
+  if (!options.force && !settings.enabled) {
+    return { status: "skipped", reason: "paused", sent: 0, reports: [] };
+  }
+  if (!options.force && !isWorkingDay(now)) {
+    return { status: "skipped", reason: "holiday", sent: 0, reports: [] };
+  }
+  if (!options.force && (await options.store.get(lockKey))) {
+    return { status: "skipped", reason: "already-ran", sent: 0, reports: [] };
+  }
+  if (!options.force) await options.store.put(lockKey, now.toISOString(), 36 * 3600);
+
+  try {
+    const found = await findVacancies({
+      fetch: options.fetch,
+      store: options.store,
+      now,
+      periodDays: settings.periodDays,
+      enrichLimit: Math.max(settings.limit * 2 + 4, 10),
+      superjobKey: options.superjobKey,
+      minSalary: settings.minSalary,
+      onReports: (reports) => options.send(formatSourceStatus(formatMoscowDate(now), reports)),
+    });
+
+    const timestamp = now.getTime();
+    const book = found.book;
+    for (const vacancy of found.vacancies) {
+      const scored = scoreVacancy(vacancy, timestamp, settings.minSalary);
+      if (!scored || scored.score < settings.minScore) book[vacancy.dedupeKey] = "skip";
+    }
+
+    // Лимит — на каждое резюме: до N вакансий под COO и до N под «Руководителя операционных проектов».
+    const ranked = selectMatches(found.vacancies, {
+      now: timestamp,
+      periodDays: settings.periodDays,
+      minScore: settings.minScore,
+      limit: 1_000,
+      minSalary: settings.minSalary,
+    });
+    const chosen = [
+      ...ranked.filter((vacancy) => resumeTrack(vacancy.title) === "coo").slice(0, settings.limit),
+      ...ranked.filter((vacancy) => resumeTrack(vacancy.title) === "projects").slice(0, settings.limit),
+    ];
+    if (chosen.length === 0) await options.send(`На ${formatMoscowDate(now)} новых подходящих вакансий нет.`);
+    // Письма пишем параллельно, а учёт сохраняем ДО отправки карточек:
+    // ручной поиск Cloudflare обрывает примерно через 30 секунд, и кнопки должны работать,
+    // даже если подборка оборвалась на середине.
+    const pairs = pickPairs(chosen);
+    const letters = await Promise.all(chosen.map((vacancy, index) => writeLetter(vacancy, { ai: options.ai, pair: pairs[index] })));
+    const tracked = chosen.map((vacancy, index): { record: AppRecord; details: AppDetails } => ({
+      record: {
+        id: shortId(vacancy.dedupeKey),
+        title: vacancy.title,
+        company: vacancy.company,
+        url: vacancy.url,
+        group: roleGroup(vacancy.title),
+        status: "new",
+        sentAt: now.toISOString(),
+      },
+      details: { vacancy: { ...vacancy, description: vacancy.description.slice(0, 4_000) }, letter: letters[index].text, rewrites: 0 },
+    }));
+    await addApps(options.store, tracked);
+    for (const vacancy of chosen) book[vacancy.dedupeKey] = "seen";
+    await writeBook(options.store, book);
+
+    for (const [index, vacancy] of chosen.entries()) {
+      const { record } = tracked[index];
+      const resume = RESUME_LABEL[resumeTrack(vacancy.title)];
+      await options.send(formatVacancyCard(vacancy, whyLine(vacancy), record.group, resume), { markup: newVacancyButtons(record.id) });
+      await options.send(letters[index].text, { plain: true });
+    }
+
+    const result: DigestResult = {
+      status: chosen.length ? "sent" : "empty",
+      sent: chosen.length,
+      reports: found.reports,
+    };
+    await options.store.put("last-run", JSON.stringify({ ...result, at: now.toISOString() }));
+    await options.store.put("profile", JSON.stringify({ name: profile.name, city: profile.city, targetRole: profile.targetRole }));
+    await options.store.put(lockKey, now.toISOString(), 36 * 3600);
+    return result;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await options.store.put("last-run", JSON.stringify({ status: "failed", reason: message, at: now.toISOString(), sent: 0, reports: [] }));
+    if (!options.force) await options.store.put(lockKey, "failed", 120);
+    try {
+      await options.send(`Не удалось собрать подборку: ${message.slice(0, 400)}`);
+    } catch {
+      // отправитель тоже может быть недоступен
+    }
+    return { status: "failed", reason: message, sent: 0, reports: [] };
+  }
+}
+
+export async function setPaused(store: Store, paused: boolean): Promise<Settings> {
+  const settings = await readSettings(store);
+  const next = { ...settings, enabled: !paused };
+  await writeSettings(store, next);
+  return next;
+}

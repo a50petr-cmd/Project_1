@@ -1,0 +1,25 @@
+name = "alekseev-job-bot"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+
+# 07:00 UTC = 10:00 Москва — подборка вакансий, понедельник–пятница.
+# 15:00 UTC = 18:00 Москва — напоминания об откликах без ответа, по пятницам ещё и сводка недели.
+[triggers]
+crons = ["0 7 * * 1-5", "0 15 * * 1-5"]
+
+# Workers AI пишет сопроводительные письма. Бесплатного дневного лимита хватает с запасом.
+[ai]
+binding = "AI"
+
+# id подставляется после `npm run kv` (или GitHub Actions из секрета KV_NAMESPACE_ID).
+[[kv_namespaces]]
+binding = "JOBS"
+id = "replace-with-kv-namespace-id"
+
+[vars]
+# Вакансий в день на каждое резюме (COO и операционные проекты).
+DIGEST_LIMIT = "3"
+SEARCH_PERIOD_DAYS = "14"
+MIN_SCORE = "78"
+# 0 — не фильтровать по зарплате; иначе минимум «на руки» в рублях.
+MIN_SALARY = "0"
