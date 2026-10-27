@@ -21,15 +21,16 @@ const vacancy: ScoredVacancy = {
   remote: true,
 };
 
-test("template letter opens with a result, not a greeting, and has no contacts", () => {
+test("template letter opens with a result, not a greeting, and has website", () => {
   const letter = templateLetter(vacancy);
   assert.match(letter.split("\n")[0], /^В X5 Group/);
   assert.match(letter, /10–15%/);
   assert.match(letter, /Север Импорт/);
   assert.doesNotMatch(letter, /Здравствуйте|Меня зовут|С уважением/);
-  assert.doesNotMatch(letter, /\+7|@|https?:/);
-  assert.match(letter, /Пётр Алексеев$/);
-  assert.ok(letter.length < 700, `length ${letter.length}`);
+  assert.doesNotMatch(letter, /\+7|@/);
+  assert.match(letter, /Пётр Алексеев/);
+  assert.match(letter, /petr-alekseev\.ru$/);
+  assert.ok(letter.length < 750, `length ${letter.length}`);
 });
 
 test("franchise role leads with franchise results and mentions trips outside Moscow", () => {

@@ -28,7 +28,7 @@ import {
   type AppStatus,
 } from "./tracker.ts";
 
-export const VERSION = "jobs-10";
+export const VERSION = "jobs-11";
 
 export interface Env {
   JOBS: KVNamespace;

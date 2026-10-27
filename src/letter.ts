@@ -100,7 +100,7 @@ export function templateLetter(vacancy: ScoredVacancy, shift = 0, pair?: Achieve
     lead?.text ?? "",
     taskLine(vacancy),
     [locationLine(vacancy), "Готов созвониться и обсудить."].filter(Boolean).join(" "),
-    profile.shortName,
+    `${profile.shortName}\npetr-alekseev.ru`,
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -122,7 +122,11 @@ const SYSTEM_PROMPT = `Ты Пётр Алексеев. Пишешь письмо
 - Живой, уверенный тон: не «я считаю, что…», а прямо «вот что нужно делать».
 - Связь между тем, что ты делал, и тем, что им нужно. Это естественно, не через «Судия по вакансии…».
 - Короче думай и пиши. Не лишние слова.
-- Вот пример (для других данных): «В Комусе запустил доставку с нуля: за 4 месяца заказы росли до 200% в месяц. Вижу, что вам то же самое нужно выстроить. Готов созвониться и обсудить.»
+- В конце письма (перед подписью) добавь ссылку: petr-alekseev.ru
+- Вот пример (для других данных): «В Комусе запустил доставку с нуля: за 4 месяца заказы росли до 200% в месяц. Вижу, что вам то же самое нужно выстроить. Готов созвониться и обсудить.
+
+Пётр Алексеев
+petr-alekseev.ru»
 
 Запрещено:
 - Стандартные фразы: «Здравствуйте», «Меня зовут», «Ваша вакансия меня заинтересовала», «буду рад», «с уважением», «Давайте обсудим».
@@ -147,6 +151,7 @@ function userPrompt(vacancy: ScoredVacancy, pair: Achievement[], avoid?: string)
     `Твой результат, который напрямую под эту вакансию: ${pair[0]?.text ?? ""}`,
     "",
     "Напиши письмо так, чтобы звучало как от конкретного человека, который сделал это в прошлом и видит, что компании нужно то же самое.",
+    "В конце (перед подписью) добавь ссылку: petr-alekseev.ru",
     avoid ? `\nПрошлый вариант не подошёл. Напиши совсем по-другому, другой результат, другой угол:\n${avoid}` : "",
   ]
     .filter(Boolean)
@@ -172,7 +177,12 @@ export function rejectAiLetter(letter: string, vacancy: ScoredVacancy, lead?: Ac
   if (letter.length < 200) return "слишком короткое";
   if (letter.length > 800) return "слишком длинное";
   if (/меня зовут|хочу откликнуться|ваша вакансия меня заинтересовала/i.test(letter.slice(0, 120))) return "шаблонное начало";
-  if (/[a-z]{3,}@|\+7|https?:\/\//i.test(letter)) return "контакты в тексте";
+  // Разрешаем ссылку на petr-alekseev.ru, но не email и телефон
+  if (/[a-z]{3,}@|\+7/i.test(letter)) return "контакты в тексте";
+  // Ссылки допустимы только на сайт
+  const links = letter.match(/https?:\/\/[^\s]+/gi) ?? [];
+  const invalidLinks = links.filter((link) => !link.toLowerCase().includes("petr-alekseev.ru"));
+  if (invalidLinks.length > 0) return "чужие ссылки в тексте";
   const cliche = letter.match(/демонстрирует|показывает мой|подтверждает мой|мой потенциал|мне удалось|возможности сотрудничества|буду рад|с уважением|я уверен|принёс оборот|принес оборот/i);
   if (cliche) return `канцелярит: ${cliche[0]}`;
   const allowed = new Set([...numbersOf(resumeFacts), ...numbersOf(`${vacancy.title} ${vacancy.description}`)]);
