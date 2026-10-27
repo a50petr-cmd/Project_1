@@ -20,11 +20,15 @@ import {
   saveDetails,
   setStatus,
   updateApp,
+  upsertApp,
   writeApps,
+  cardToRecord,
+  detailsFromRecord,
+  type AppRecord,
   type AppStatus,
 } from "./tracker.ts";
 
-export const VERSION = "jobs-5";
+export const VERSION = "jobs-6";
 
 export interface Env {
   JOBS: KVNamespace;
@@ -47,7 +51,12 @@ type TelegramUpdate = {
   callback_query?: {
     id: string;
     data?: string;
-    message?: { message_id?: number; chat?: { id?: number } };
+    message?: {
+      message_id?: number;
+      chat?: { id?: number };
+      text?: string;
+      entities?: Array<{ type?: string; url?: string }>;
+    };
   };
 };
 
@@ -171,8 +180,11 @@ async function handleCallback(env: Env, query: NonNullable<TelegramUpdate["callb
   const chat = String(chatId);
   const now = new Date();
 
+  // Запасной путь: если записи нет (подборка оборвалась до сохранения), восстанавливаем её по тексту карточки.
+  const card = query.message?.text ? cardToRecord(query.message.text, query.message.entities ?? [], id, now) : null;
+
   if (code === "rw") {
-    const details = await readDetails(store, id);
+    const details = (await readDetails(store, id)) ?? (card ? detailsFromRecord(card) : null);
     if (!details) {
       await tell(env, chat, "Не нашёл эту вакансию: данные хранятся 120 дней.");
       return;
@@ -183,10 +195,15 @@ async function handleCallback(env: Env, query: NonNullable<TelegramUpdate["callb
     return;
   }
 
-  const record = await updateApp(store, id, (app) => {
+  const change = (app: AppRecord): AppRecord => {
     if (code === "nr") return { ...app, remindedAt: now.toISOString() };
     return setStatus(action.status as AppStatus, now)(app);
-  });
+  };
+  let record = await updateApp(store, id, change);
+  if (!record && card) {
+    record = change(card);
+    await upsertApp(store, record);
+  }
   if (!record) {
     await tell(env, chat, "Не нашёл эту вакансию в учёте.");
     return;

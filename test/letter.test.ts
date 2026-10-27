@@ -75,3 +75,9 @@ test("AI failure falls back to the template", async () => {
   const result = await writeLetter(vacancy, { ai: { run: async () => Promise.reject(new Error("quota")) } });
   assert.equal(result.by, "template");
 });
+
+test("AI letter with bureaucratic phrases falls back to the template", async () => {
+  const text = goodAi.replace("Удобно созвониться на этой неделе?", "Это демонстрирует мой потенциал. Давайте обсудим возможности сотрудничества.");
+  const result = await writeLetter(vacancy, { ai: fakeAi(text) });
+  assert.equal(result.by, "template");
+});

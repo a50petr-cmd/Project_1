@@ -197,3 +197,47 @@ function advice(
   }
   return "Данных пока мало для выводов: нужно хотя бы 10 отмеченных откликов.";
 }
+
+export async function upsertApp(store: Store, record: AppRecord): Promise<void> {
+  const apps = await readApps(store);
+  const index = apps.findIndex((app) => app.id === record.id);
+  if (index === -1) apps.push(record);
+  else apps[index] = record;
+  await writeApps(store, apps);
+}
+
+// Карточка вакансии: 1-я строка — название, 2-я — «компания · город · площадка», дальше «Роль: …» и ссылка.
+export function cardToRecord(text: string, entities: Array<{ type?: string; url?: string }>, id: string, now: Date): AppRecord | null {
+  const lines = text.split("\n").map((line) => line.trim());
+  const title = lines[0] ?? "";
+  if (!title || !lines.some((line) => line.startsWith("Роль:"))) return null;
+  const [company = "", city = ""] = (lines[1] ?? "").split(" · ");
+  const group = (lines.find((line) => line.startsWith("Роль:")) ?? "").replace("Роль:", "").trim() || "Другое";
+  const url = entities.find((entity) => entity.type === "text_link" && entity.url)?.url ?? "";
+  return { id, title, company, url, group, status: "new", sentAt: now.toISOString(), city } as AppRecord & { city: string };
+}
+
+export function detailsFromRecord(record: AppRecord): AppDetails {
+  const city = (record as AppRecord & { city?: string }).city ?? "";
+  return {
+    vacancy: {
+      source: "hh",
+      id: record.id,
+      dedupeKey: record.id,
+      title: record.title,
+      company: record.company,
+      url: record.url,
+      city,
+      region: city,
+      salary: "",
+      publishedAt: "",
+      workFormat: "",
+      employment: "",
+      description: "",
+      score: 0,
+      remote: false,
+    },
+    letter: "",
+    rewrites: 0,
+  };
+}

@@ -89,29 +89,31 @@ export async function runDigest(options: {
       minSalary: settings.minSalary,
     });
     if (chosen.length === 0) await options.send(`На ${formatMoscowDate(now)} новых подходящих вакансий нет.`);
-    const tracked: Array<{ record: AppRecord; details: AppDetails }> = [];
-    for (const vacancy of chosen) {
-      const id = shortId(vacancy.dedupeKey);
-      const group = roleGroup(vacancy.title);
-      const letter = await writeLetter(vacancy, { ai: options.ai });
-      await options.send(formatVacancyCard(vacancy, whyLine(vacancy), group), { markup: newVacancyButtons(id) });
-      await options.send(letter.text, { plain: true });
-      book[vacancy.dedupeKey] = "seen";
-      tracked.push({
-        record: {
-          id,
-          title: vacancy.title,
-          company: vacancy.company,
-          url: vacancy.url,
-          group,
-          status: "new",
-          sentAt: now.toISOString(),
-        },
-        details: { vacancy: { ...vacancy, description: vacancy.description.slice(0, 4_000) }, letter: letter.text, rewrites: 0 },
-      });
-    }
+    // Письма пишем параллельно, а учёт сохраняем ДО отправки карточек:
+    // ручной поиск Cloudflare обрывает примерно через 30 секунд, и кнопки должны работать,
+    // даже если подборка оборвалась на середине.
+    const letters = await Promise.all(chosen.map((vacancy) => writeLetter(vacancy, { ai: options.ai })));
+    const tracked = chosen.map((vacancy, index): { record: AppRecord; details: AppDetails } => ({
+      record: {
+        id: shortId(vacancy.dedupeKey),
+        title: vacancy.title,
+        company: vacancy.company,
+        url: vacancy.url,
+        group: roleGroup(vacancy.title),
+        status: "new",
+        sentAt: now.toISOString(),
+      },
+      details: { vacancy: { ...vacancy, description: vacancy.description.slice(0, 4_000) }, letter: letters[index].text, rewrites: 0 },
+    }));
     await addApps(options.store, tracked);
+    for (const vacancy of chosen) book[vacancy.dedupeKey] = "seen";
     await writeBook(options.store, book);
+
+    for (const [index, vacancy] of chosen.entries()) {
+      const { record } = tracked[index];
+      await options.send(formatVacancyCard(vacancy, whyLine(vacancy), record.group), { markup: newVacancyButtons(record.id) });
+      await options.send(letters[index].text, { plain: true });
+    }
 
     const result: DigestResult = {
       status: chosen.length ? "sent" : "empty",

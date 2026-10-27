@@ -23,7 +23,7 @@ Telegram-бот для Петра Алексеева. По рабочим дня
 
 ## Выкладка
 
-GitHub Actions (`.github/workflows/deploy.yml`) на каждый push в ветку запускает тесты и `wrangler deploy`. Нужны секреты репозитория `CLOUDFLARE_API_TOKEN` (шаблон «Edit Cloudflare Workers») и `KV_NAMESPACE_ID`; `CLOUDFLARE_ACCOUNT_ID` — если у токена несколько аккаунтов. После выкладки `https://alekseev-job-bot.a50petr.workers.dev/health` отвечает `ok jobs-5`.
+GitHub Actions (`.github/workflows/deploy.yml`) на каждый push в ветку запускает тесты и `wrangler deploy`. Нужны секреты репозитория `CLOUDFLARE_API_TOKEN` (шаблон «Edit Cloudflare Workers») и `KV_NAMESPACE_ID`; `CLOUDFLARE_ACCOUNT_ID` — если у токена несколько аккаунтов. После выкладки `https://alekseev-job-bot.a50petr.workers.dev/health` отвечает `ok jobs-6`.
 
 ## Команды
 

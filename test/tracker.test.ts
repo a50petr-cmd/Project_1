@@ -65,3 +65,16 @@ test("new roles score high enough to be searched", () => {
   assert.equal(roleGroup("Руководитель e-commerce"), "E-commerce и доставка");
   assert.equal(roleGroup("Директор по франчайзингу"), "Франчайзинг и развитие сети");
 });
+
+test("a card that lost its record is rebuilt from the message text", async () => {
+  const { cardToRecord, upsertApp } = await import("../src/tracker.ts");
+  const text = "Директор по логистике\nОчаковская Логистическая Компания · Москва · hh.ru\nРоль: Другое\nОткрыть вакансию";
+  const record = cardToRecord(text, [{ type: "text_link", url: "https://hh.ru/vacancy/9" }], "abc", new Date("2026-10-27T18:00:00Z"));
+  assert.equal(record?.title, "Директор по логистике");
+  assert.equal(record?.company, "Очаковская Логистическая Компания");
+  assert.equal(record?.url, "https://hh.ru/vacancy/9");
+  const store = memoryStore();
+  await upsertApp(store, setStatus("applied", new Date())(record!));
+  assert.equal((await readApps(store))[0].status, "applied");
+  assert.equal(cardToRecord("просто текст", [], "x", new Date()), null);
+});
