@@ -8,7 +8,7 @@ const found = await findVacancies({
   periodDays: 14,
   enrichLimit: 12,
   superjobKey: process.env.SUPERJOB_API_KEY,
-  minSalary: 250_000,
+  minSalary: 0,
 });
 
 console.log("sources:");
@@ -21,7 +21,7 @@ const chosen = selectMatches(found.vacancies, {
   periodDays: 14,
   minScore: 78,
   limit: 5,
-  minSalary: 250_000,
+  minSalary: 0,
 });
 
 console.log(`\nmatches: ${chosen.length}`);

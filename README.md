@@ -6,7 +6,7 @@ Telegram-бот для Петра Алексеева. По рабочим дня
 
 ## Что ищет
 
-Роли по всей России: операционный директор (COO), Head of Operations, операционный менеджер, руководитель операционных проектов, менеджер проектов, руководитель направления, франчайзинг и развитие сети, e-commerce / e-grocery / доставка, руководитель B2B. Вакансии с зарплатой ниже 250 тыс. ₽ на руки отсекаются (`MIN_SALARY`); вакансии без зарплаты остаются.
+Роли по всей России: операционный директор (COO), Head of Operations, операционный менеджер, руководитель операционных проектов, менеджер проектов, руководитель направления, франчайзинг и развитие сети, e-commerce / e-grocery / доставка, руководитель B2B. Фильтр по зарплате выключен (`MIN_SALARY = "0"`): приходят вакансии с любой зарплатой и без неё. Чтобы включить, задайте минимум «на руки» в рублях.
 
 Площадки: hh.ru, Зарплата.ру, Работа России, Хабр Карьера, SuperJob (если задан ключ API).
 
@@ -23,7 +23,7 @@ Telegram-бот для Петра Алексеева. По рабочим дня
 
 ## Выкладка
 
-GitHub Actions (`.github/workflows/deploy.yml`) на каждый push в ветку запускает тесты и `wrangler deploy`. Нужны секреты репозитория `CLOUDFLARE_API_TOKEN` (шаблон «Edit Cloudflare Workers») и `KV_NAMESPACE_ID`; `CLOUDFLARE_ACCOUNT_ID` — если у токена несколько аккаунтов. После выкладки `https://alekseev-job-bot.a50petr.workers.dev/health` отвечает `ok jobs-4`.
+GitHub Actions (`.github/workflows/deploy.yml`) на каждый push в ветку запускает тесты и `wrangler deploy`. Нужны секреты репозитория `CLOUDFLARE_API_TOKEN` (шаблон «Edit Cloudflare Workers») и `KV_NAMESPACE_ID`; `CLOUDFLARE_ACCOUNT_ID` — если у токена несколько аккаунтов. После выкладки `https://alekseev-job-bot.a50petr.workers.dev/health` отвечает `ok jobs-5`.
 
 ## Команды
 

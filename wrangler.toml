@@ -20,4 +20,5 @@ id = "replace-with-kv-namespace-id"
 DIGEST_LIMIT = "5"
 SEARCH_PERIOD_DAYS = "14"
 MIN_SCORE = "78"
-MIN_SALARY = "250000"
+# 0 — не фильтровать по зарплате; иначе минимум «на руки» в рублях.
+MIN_SALARY = "0"

@@ -16,7 +16,7 @@ export const defaultSettings: Settings = {
   limit: 5,
   periodDays: 14,
   minScore: 78,
-  minSalary: 250_000,
+  minSalary: 0,
 };
 
 export async function readSettings(store: Store, fallback: Settings = defaultSettings): Promise<Settings> {

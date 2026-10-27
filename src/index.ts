@@ -24,7 +24,7 @@ import {
   type AppStatus,
 } from "./tracker.ts";
 
-export const VERSION = "jobs-4";
+export const VERSION = "jobs-5";
 
 export interface Env {
   JOBS: KVNamespace;
@@ -66,12 +66,14 @@ function settingsFromEnv(env: Env): Partial<Settings> {
   const limit = read(env.DIGEST_LIMIT);
   const periodDays = read(env.SEARCH_PERIOD_DAYS);
   const minScore = read(env.MIN_SCORE);
-  const minSalary = read(env.MIN_SALARY);
+  // Порог зарплаты задаётся только в wrangler.toml, 0 — без фильтра.
+  const salary = Number(env.MIN_SALARY);
+  const minSalary = Number.isFinite(salary) && salary >= 0 ? salary : null;
   return {
     ...(limit ? { limit } : {}),
     ...(periodDays ? { periodDays } : {}),
     ...(minScore ? { minScore } : {}),
-    ...(minSalary ? { minSalary } : {}),
+    ...(minSalary !== null ? { minSalary } : {}),
   };
 }
 
@@ -268,7 +270,7 @@ async function routeMessage(
         `Версия: ${VERSION}`,
         `Рассылка: ${settings.enabled ? "включена" : "на паузе"}`,
         `Письма пишет: ${env.AI ? "ИИ Cloudflare (если ответ не прошёл проверку — шаблон)" : "шаблон (ИИ не подключён)"}`,
-        `Зарплата от: ${settings.minSalary.toLocaleString("ru-RU")} ₽ на руки`,
+        settings.minSalary > 0 ? `Зарплата от: ${settings.minSalary.toLocaleString("ru-RU")} ₽ на руки` : "Фильтр по зарплате: выключен",
         `SuperJob: ${env.SUPERJOB_API_KEY ? "подключён" : "без ключа"}`,
         last ? `Последний запуск: ${last}` : "Запусков ещё не было.",
       ].join("\n"),
