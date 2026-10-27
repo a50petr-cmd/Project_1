@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { runDigest } from "../src/digest.ts";
 import { memoryStore } from "../src/store.ts";
+import { readApps } from "../src/tracker.ts";
 
 const rss = `<?xml version="1.0"?><rss><channel><item><title>Операционный директор (COO)</title><link>https://hh.ru/vacancy/555</link><pubDate>2026-10-06T10:00:00+03:00</pubDate><description><![CDATA[<p>Вакансия компании: Север Импорт</p><p>Регион: Москва</p><p>Предполагаемый уровень месячного дохода: не указан</p>]]></description></item></channel></rss>`;
 
@@ -35,33 +36,41 @@ function fakeFetch(): typeof fetch {
   }) as typeof fetch;
 }
 
-test("digest sends one letter and does not repeat it", async () => {
+test("digest sends a card with buttons, then the bare letter, and does not repeat it", async () => {
   const store = memoryStore();
   const sent: string[] = [];
+  const extras: Array<{ markup?: unknown; plain?: boolean } | undefined> = [];
   const now = new Date("2026-10-07T06:00:00Z");
   const first = await runDigest({
     store,
     fetch: fakeFetch(),
     now,
     force: true,
-    contacts: { telegram: "https://t.me/PetroAlekseev" },
-    send: async (text) => {
+    send: async (text, extra) => {
       sent.push(text);
+      extras.push(extra);
     },
   });
   assert.equal(first.status, "sent");
   assert.equal(first.sent, 1);
-  const reportAt = sent.findIndex((text) => text.startsWith("Отчёт"));
-  const letterAt = sent.findIndex((text) => text.includes("X5 Group"));
-  assert.ok(reportAt !== -1 && letterAt !== -1 && reportAt < letterAt);
-  assert.ok(sent.some((text) => text.includes("Север Импорт") && text.includes("X5 Group")));
+  const reportAt = sent.findIndex((text) => text.startsWith("Поиск на"));
+  const cardAt = sent.findIndex((text) => text.includes("Открыть вакансию"));
+  assert.ok(reportAt !== -1 && cardAt > reportAt);
+  assert.match(sent[cardAt], /Север Импорт/);
+  assert.ok(extras[cardAt]?.markup, "card has inline buttons");
+  const letter = sent[cardAt + 1];
+  assert.equal(extras[cardAt + 1]?.plain, true);
+  assert.match(letter, /X5 Group/);
+  assert.doesNotMatch(letter, /Открыть вакансию|<b>|Сопроводительное/);
+  const apps = await readApps(store);
+  assert.equal(apps.length, 1);
+  assert.equal(apps[0].status, "new");
 
   const again = await runDigest({
     store,
     fetch: fakeFetch(),
     now,
     force: true,
-    contacts: {},
     send: async (text) => {
       sent.push(text);
     },
@@ -79,7 +88,6 @@ test("scheduled run waits on a holiday", async () => {
       return new Response("no", { status: 500 });
     }) as typeof fetch,
     now: new Date("2026-11-04T06:00:00Z"),
-    contacts: {},
     send: async () => {
       throw new Error("should not send");
     },

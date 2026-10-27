@@ -8,6 +8,7 @@ export type Settings = {
   limit: number;
   periodDays: number;
   minScore: number;
+  minSalary: number;
 };
 
 export const defaultSettings: Settings = {
@@ -15,6 +16,7 @@ export const defaultSettings: Settings = {
   limit: 5,
   periodDays: 14,
   minScore: 78,
+  minSalary: 250_000,
 };
 
 export async function readSettings(store: Store, fallback: Settings = defaultSettings): Promise<Settings> {
@@ -27,6 +29,7 @@ export async function readSettings(store: Store, fallback: Settings = defaultSet
       limit: parsed.limit ?? fallback.limit,
       periodDays: parsed.periodDays ?? fallback.periodDays,
       minScore: parsed.minScore ?? fallback.minScore,
+      minSalary: parsed.minSalary ?? fallback.minSalary,
     };
   } catch {
     return fallback;

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { coverLetter } from "../src/letter.ts";
+import { cleanAiLetter, rejectAiLetter, templateLetter, writeLetter, type AiLike } from "../src/letter.ts";
 import type { ScoredVacancy } from "../src/types.ts";
 
 const vacancy: ScoredVacancy = {
@@ -21,49 +21,57 @@ const vacancy: ScoredVacancy = {
   remote: true,
 };
 
-test("letter is short, names the vacancy, and keeps a real result", () => {
-  const letter = coverLetter(vacancy, { telegram: "https://t.me/PetroAlekseev" });
-  assert.match(letter, /Север Импорт/);
-  assert.match(letter, /Операционный директор \(COO\)/);
-  assert.match(letter, /Операционный контур/);
-  assert.match(letter, /По поставкам/);
-  assert.match(letter, /X5 Group/);
+test("template letter opens with a result, not a greeting, and has no contacts", () => {
+  const letter = templateLetter(vacancy);
+  assert.match(letter.split("\n")[0], /^В X5 Group/);
   assert.match(letter, /10–15%/);
-  assert.match(letter, /t\.me\/PetroAlekseev/);
-  assert.doesNotMatch(letter, /для меня главное/);
-  assert.doesNotMatch(letter, /Нужен руководитель импортных поставок/);
-  assert.ok(letter.length < 800);
-  assert.doesNotMatch(letter, /\+7/);
-  assert.doesNotMatch(letter, /@/);
+  assert.match(letter, /Север Импорт/);
+  assert.doesNotMatch(letter, /Здравствуйте|Меня зовут|С уважением/);
+  assert.doesNotMatch(letter, /\+7|@|https?:/);
+  assert.match(letter, /Пётр Алексеев$/);
+  assert.ok(letter.length < 700, `length ${letter.length}`);
 });
 
-test("letter for a store launch outside Moscow uses that experience", () => {
-  const letter = coverLetter(
-    {
-      ...vacancy,
-      title: "Менеджер проектов",
-      company: "Сеть Юг",
-      city: "Краснодар",
-      region: "Краснодарский край",
-      workFormat: "на месте работодателя",
-      description: "Запуск розничных магазинов франшизы.",
-      remote: false,
-    },
-    { telegram: "https://t.me/PetroAlekseev" },
-  );
-  assert.match(letter, /Направление|Проект|розниц/);
-  assert.match(letter, /Фасоль|Пятёрочка/);
-  assert.match(letter, /командировк/);
-  assert.doesNotMatch(letter, /Переезд не рассматриваю/);
-  assert.ok(letter.length < 800);
-});
-
-test("letter adds phone and email only from contacts", () => {
-  const letter = coverLetter(vacancy, {
-    phone: "+7 000 000-00-00",
-    email: "person@example.com",
-    telegram: "https://t.me/PetroAlekseev",
+test("franchise role leads with franchise results and mentions trips outside Moscow", () => {
+  const letter = templateLetter({
+    ...vacancy,
+    title: "Руководитель отдела франчайзинга",
+    company: "Сеть Юг",
+    city: "Краснодар",
+    region: "Краснодарский край",
+    workFormat: "на месте работодателя",
+    description: "Запуск розничных магазинов франшизы.",
+    remote: false,
   });
-  assert.match(letter, /\+7 000 000-00-00/);
-  assert.match(letter, /person@example.com/);
+  assert.match(letter.split("\n")[0], /Фасоль/);
+  assert.match(letter, /командировк/);
+});
+
+test("another letter variant starts with a different result", () => {
+  assert.notEqual(templateLetter(vacancy, 0).split("\n")[0], templateLetter(vacancy, 1).split("\n")[0]);
+});
+
+const goodAi =
+  "В X5 Group запускал оптовый импорт продуктов: выручка росла на 10–15% в квартал, EBITDA — на 5–10%. Вам нужен человек, который соберёт поставки, склад и логистику в одну экономику, — этим я и занимался. В Евроопте за 5 месяцев вдвое сократил затраты направления. Удобно созвониться на этой неделе?";
+
+function fakeAi(response: string): AiLike {
+  return { run: async () => ({ response }) };
+}
+
+test("AI letter is used when it passes the checks", async () => {
+  const result = await writeLetter(vacancy, { ai: fakeAi(`Здравствуйте!\n\n${goodAi}`) });
+  assert.equal(result.by, "ai");
+  assert.doesNotMatch(result.text, /^Здравствуйте/);
+  assert.match(result.text, /Пётр Алексеев$/);
+});
+
+test("AI letter with an invented number falls back to the template", async () => {
+  const result = await writeLetter(vacancy, { ai: fakeAi(goodAi.replace("10–15%", "47%")) });
+  assert.equal(result.by, "template");
+  assert.match(rejectAiLetter(cleanAiLetter(goodAi.replace("10–15%", "47%")), vacancy) ?? "", /47/);
+});
+
+test("AI failure falls back to the template", async () => {
+  const result = await writeLetter(vacancy, { ai: { run: async () => Promise.reject(new Error("quota")) } });
+  assert.equal(result.by, "template");
 });

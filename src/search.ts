@@ -1,4 +1,4 @@
-import { isAddedRole, isRecent, rankVacancies, titleScore } from "./match.ts";
+import { belowSalary, isAddedRole, isRecent, rankVacancies, titleScore } from "./match.ts";
 import { enrichVacancy, searchHabr, searchHh, searchSuperjob, searchTrudvsem, searchZarplata, type FetchLike } from "./sources.ts";
 import { readBook, type Book, type Store } from "./store.ts";
 import { normalizeKey } from "./text.ts";
@@ -69,6 +69,7 @@ export async function findVacancies(options: {
   periodDays: number;
   enrichLimit: number;
   superjobKey?: string;
+  minSalary?: number;
   onReports?: (reports: SourceReport[]) => Promise<void>;
 }): Promise<{ reports: SourceReport[]; vacancies: Vacancy[]; book: Book }> {
   const batches = await Promise.all([
@@ -86,6 +87,7 @@ export async function findVacancies(options: {
     .filter((vacancy) => titleScore(vacancy.title) >= 26)
     .filter((vacancy) => isRecent(vacancy.publishedAt, now, options.periodDays))
     .filter((vacancy) => !book[vacancy.dedupeKey])
+    .filter((vacancy) => !belowSalary(vacancy.salary, options.minSalary ?? 0))
     .sort((a, b) => titleScore(b.title) - titleScore(a.title) || Date.parse(b.publishedAt) - Date.parse(a.publishedAt));
 
   const enriched = await mapPool(pickForEnrich(vacancies, options.enrichLimit), 3, (vacancy) => enrichVacancy(options.fetch, vacancy));
@@ -103,7 +105,7 @@ export function pickForEnrich(vacancies: Vacancy[], limit: number): Vacancy[] {
 
 export function selectMatches(
   vacancies: Vacancy[],
-  options: { now: number; periodDays: number; minScore: number; limit: number },
+  options: { now: number; periodDays: number; minScore: number; limit: number; minSalary?: number },
 ): ScoredVacancy[] {
   return rankVacancies(vacancies, options);
 }

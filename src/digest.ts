@@ -1,12 +1,33 @@
 import { formatMoscowDate, isWorkingDay } from "./calendar.ts";
-import { coverLetter } from "./letter.ts";
-import { scoreVacancy } from "./match.ts";
+import { dominantThemes, writeLetter, type AiLike } from "./letter.ts";
+import { roleGroup, scoreVacancy } from "./match.ts";
 import { profile } from "./profile.ts";
-import { findVacancies, seenKey, selectMatches } from "./search.ts";
+import { findVacancies, selectMatches } from "./search.ts";
 import type { FetchLike } from "./sources.ts";
 import { readSettings, writeBook, writeSettings, type Settings, type Store } from "./store.ts";
-import { formatSourceStatus, formatVacancyMessages } from "./telegram.ts";
-import type { Contacts, SourceReport } from "./types.ts";
+import { formatSourceStatus, formatVacancyCard, newVacancyButtons, type InlineMarkup } from "./telegram.ts";
+import type { Theme } from "./profile.ts";
+import { addApps, shortId, type AppDetails, type AppRecord } from "./tracker.ts";
+import type { ScoredVacancy, SourceReport } from "./types.ts";
+
+export type Send = (text: string, extra?: { markup?: InlineMarkup; plain?: boolean }) => Promise<void>;
+
+const THEME_LABEL: Record<Theme, string> = {
+  import: "импорт и логистика",
+  ecommerce: "онлайн-продажи",
+  franchise: "розница и франчайзинг",
+  darkstore: "доставка",
+  b2b: "B2B и опт",
+  pnl: "P&L и затраты",
+  team: "процессы и команда",
+  projects: "запуски проектов",
+};
+
+export function whyLine(vacancy: ScoredVacancy): string {
+  const themes = dominantThemes(vacancy).slice(0, 4);
+  if (themes.length === 0) return "";
+  return `в вакансии ${themes.map((theme) => THEME_LABEL[theme]).join(", ")} — это есть в вашем опыте.`;
+}
 
 export type DigestResult = {
   status: "sent" | "empty" | "skipped" | "failed";
@@ -18,10 +39,10 @@ export type DigestResult = {
 export async function runDigest(options: {
   store: Store;
   fetch: FetchLike;
-  send: (text: string) => Promise<void>;
+  send: Send;
+  ai?: AiLike;
   now?: Date;
   force?: boolean;
-  contacts: Contacts;
   superjobKey?: string;
   settingsOverride?: Partial<Settings>;
 }): Promise<DigestResult> {
@@ -49,13 +70,14 @@ export async function runDigest(options: {
       periodDays: settings.periodDays,
       enrichLimit: Math.max(settings.limit, 8),
       superjobKey: options.superjobKey,
+      minSalary: settings.minSalary,
       onReports: (reports) => options.send(formatSourceStatus(formatMoscowDate(now), reports)),
     });
 
     const timestamp = now.getTime();
     const book = found.book;
     for (const vacancy of found.vacancies) {
-      const scored = scoreVacancy(vacancy, timestamp);
+      const scored = scoreVacancy(vacancy, timestamp, settings.minSalary);
       if (!scored || scored.score < settings.minScore) book[vacancy.dedupeKey] = "skip";
     }
 
@@ -64,21 +86,31 @@ export async function runDigest(options: {
       periodDays: settings.periodDays,
       minScore: settings.minScore,
       limit: settings.limit,
+      minSalary: settings.minSalary,
     });
-    const contacts = { telegram: profile.telegram, ...options.contacts };
     if (chosen.length === 0) await options.send(`На ${formatMoscowDate(now)} новых подходящих вакансий нет.`);
+    const tracked: Array<{ record: AppRecord; details: AppDetails }> = [];
     for (const vacancy of chosen) {
-      const letter = coverLetter(vacancy, contacts);
-      for (const message of formatVacancyMessages(vacancy, letter)) {
-        await options.send(message);
-      }
+      const id = shortId(vacancy.dedupeKey);
+      const group = roleGroup(vacancy.title);
+      const letter = await writeLetter(vacancy, { ai: options.ai });
+      await options.send(formatVacancyCard(vacancy, whyLine(vacancy), group), { markup: newVacancyButtons(id) });
+      await options.send(letter.text, { plain: true });
       book[vacancy.dedupeKey] = "seen";
-      await options.store.put(
-        seenKey(vacancy.dedupeKey),
-        JSON.stringify({ title: vacancy.title, url: vacancy.url, company: vacancy.company, letter, sentAt: now.toISOString() }),
-        120 * 86_400,
-      );
+      tracked.push({
+        record: {
+          id,
+          title: vacancy.title,
+          company: vacancy.company,
+          url: vacancy.url,
+          group,
+          status: "new",
+          sentAt: now.toISOString(),
+        },
+        details: { vacancy: { ...vacancy, description: vacancy.description.slice(0, 4_000) }, letter: letter.text, rewrites: 0 },
+      });
     }
+    await addApps(options.store, tracked);
     await writeBook(options.store, book);
 
     const result: DigestResult = {

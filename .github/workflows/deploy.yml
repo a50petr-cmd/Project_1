@@ -1,0 +1,51 @@
+name: Deploy bot
+
+# Каждый push в ветку бота проверяет тесты и выкладывает воркер в Cloudflare.
+# Нужны секреты репозитория: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, KV_NAMESPACE_ID.
+on:
+  push:
+    branches: [main, cursor/job-search-bot-0b40]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run typecheck
+      - name: Check secrets
+        id: secrets
+        env:
+          TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          KV: ${{ secrets.KV_NAMESPACE_ID }}
+        run: |
+          if [ -n "$TOKEN" ] && [ -n "$ACCOUNT" ] && [ -n "$KV" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Секреты Cloudflare не заданы — тесты прошли, выкладка пропущена."
+          fi
+      - name: Deploy to Cloudflare
+        if: steps.secrets.outputs.ready == 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          KV_NAMESPACE_ID: ${{ secrets.KV_NAMESPACE_ID }}
+        run: |
+          sed -i "s/replace-with-kv-namespace-id/${KV_NAMESPACE_ID}/" wrangler.toml
+          npx wrangler deploy
+      - name: Health check
+        if: steps.secrets.outputs.ready == 'true'
+        run: |
+          sleep 5
+          curl -fsS https://alekseev-job-bot.a50petr.workers.dev/health

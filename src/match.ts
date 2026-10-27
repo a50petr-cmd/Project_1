@@ -5,6 +5,8 @@ const ASSISTANT = /(?<![\p{L}])(стаж[её]р\p{L}*|junior|помощник\p
 const BLUE_COLLAR = /(?<![\p{L}])(курьер|кассир|кладовщик|продавец|водитель|грузчик|упаковщик|мерчандайзер)(?![\p{L}])/iu;
 const PART_TIME = /частичн\p{L}*\s+занятост|подработк|part[- ]?time/iu;
 
+const ECOM_ROLE = /e-?commerce|(?<![\p{L}])e-?com(?![\p{L}])|ecom|e-?grocery|интернет-магазин|онлайн-продаж|электронн\p{L}*\s+коммерц|доставк|даркстор|последней мил|last mile/u;
+
 export function titleScore(title: string): number {
   const value = title.toLowerCase().replace(/ё/g, "е");
   if (ASSISTANT.test(value) || BLUE_COLLAR.test(value)) return 0;
@@ -24,6 +26,15 @@ export function titleScore(title: string): number {
   else if (/\bceo\b|генеральн\p{L}*\s+директор/u.test(value)) score = 26;
   else if (/операционн/.test(value)) score = 24;
 
+  // Роли, где опыт франчайзинга, доставки и B2B особенно сильный.
+  const lead = /директор|руководител|head|начальник/.test(value);
+  if (/франчайз|франшиз/.test(value) && (lead || /менеджер/.test(value))) score = Math.max(score, lead ? 56 : 46);
+  if (/развити\p{L}*\s+(розничн\p{L}*\s+|торгов\p{L}*\s+)?сет|открыти\p{L}*\s+(магазин|точек|объект|филиал)/u.test(value) && lead) {
+    score = Math.max(score, 54);
+  }
+  if (ECOM_ROLE.test(value) && lead) score = Math.max(score, 52);
+  if (/(?<![\p{L}])b2b(?![\p{L}])/u.test(value) && lead) score = Math.max(score, 50);
+
   if (/(коммерческ\p{L}*\s+директор|директор\s+по\s+продажам|директор\s+по\s+маркетинг)/u.test(value) && !/операционн|\bcoo\b/.test(value)) {
     score = Math.min(score, 18);
   }
@@ -37,7 +48,7 @@ export function titleScore(title: string): number {
   ) {
     score = Math.min(score, 16);
   }
-  if (/магазин[аеу]?|ресторан|кофейн|салон[аеу]?|аптек/.test(value) && !/сет|федеральн|холдинг|групп/.test(value)) {
+  if (/(?<!интернет-)магазин[аеу]?|ресторан|кофейн|салон[аеу]?|аптек/.test(value) && !/сет|федеральн|холдинг|групп/.test(value)) {
     score = Math.min(score, 40);
   }
   return score;
@@ -81,7 +92,10 @@ export function isAddedRole(title: string): boolean {
     /(?<![\p{L}])(менеджер\s+проект|руководител\p{L}*\s+проект|project manager)/u.test(value) ||
     /руководител\p{L}*\s+направлен/u.test(value) ||
     /операционн\p{L}*\s+менеджер|operations manager/u.test(value) ||
-    /операционн\p{L}*\s+проект|проект\p{L}*\s+операционн/u.test(value)
+    /операционн\p{L}*\s+проект|проект\p{L}*\s+операционн/u.test(value) ||
+    /франчайз|франшиз|развити\p{L}*\s+(розничн\p{L}*\s+|торгов\p{L}*\s+)?сет/u.test(value) ||
+    ECOM_ROLE.test(value) ||
+    /(?<![\p{L}])b2b(?![\p{L}])/u.test(value)
   );
 }
 
@@ -113,7 +127,8 @@ export function isRecent(publishedAt: string, now: number, periodDays: number): 
   return days <= periodDays && days >= -1;
 }
 
-export function scoreVacancy(vacancy: Vacancy, now: number): ScoredVacancy | null {
+export function scoreVacancy(vacancy: Vacancy, now: number, minSalary = 0): ScoredVacancy | null {
+  if (belowSalary(vacancy.salary, minSalary)) return null;
   if (PART_TIME.test(`${vacancy.title} ${vacancy.employment}`)) return null;
   if (/ассистент|личный помощник/i.test(vacancy.description.slice(0, 500))) return null;
 
@@ -136,11 +151,11 @@ export function scoreVacancy(vacancy: Vacancy, now: number): ScoredVacancy | nul
 
 export function rankVacancies(
   vacancies: Vacancy[],
-  options: { now: number; periodDays: number; minScore: number; limit: number },
+  options: { now: number; periodDays: number; minScore: number; limit: number; minSalary?: number },
 ): ScoredVacancy[] {
   const ranked = vacancies
     .filter((vacancy) => isRecent(vacancy.publishedAt, options.now, options.periodDays))
-    .map((vacancy) => scoreVacancy(vacancy, options.now))
+    .map((vacancy) => scoreVacancy(vacancy, options.now, options.minSalary ?? 0))
     .filter((vacancy): vacancy is ScoredVacancy => vacancy !== null && vacancy.score >= options.minScore)
     .sort((a, b) => b.score - a.score || Date.parse(b.publishedAt) - Date.parse(a.publishedAt));
   const top = ranked.slice(0, options.limit);
@@ -149,4 +164,34 @@ export function rankVacancies(
     if (extra) top[top.length - 1] = extra;
   }
   return top;
+}
+
+// Зарплата «на руки». Если в вакансии сумма до вычета налогов, переводим её в «на руки» по НДФЛ 13%.
+// Вакансии без зарплаты и в валюте не отсекаем: директорские роли часто не пишут сумму.
+export function belowSalary(salary: string, minNet: number): boolean {
+  if (!minNet || !salary) return false;
+  const text = salary.toLowerCase().replace(/\u00a0/g, " ");
+  if (/\$|€|usd|eur|kzt|₸|byn/.test(text)) return false;
+  const amounts = (text.match(/\d[\d ]*\d|\d/g) ?? []).map((part) => Number(part.replace(/ /g, ""))).filter((value) => value >= 1_000);
+  if (amounts.length === 0) return false;
+  const top = Math.max(...amounts);
+  const net = /до вычета|gross|брутто/.test(text) ? top * 0.87 : top;
+  return net < minNet;
+}
+
+export function roleGroup(title: string): string {
+  const value = title.toLowerCase().replace(/ё/g, "е");
+  if (/франчайз|франшиз|развити\p{L}*\s+(розничн\p{L}*\s+|торгов\p{L}*\s+)?сет|открыти\p{L}*\s+(магазин|точек)/u.test(value)) {
+    return "Франчайзинг и развитие сети";
+  }
+  if (ECOM_ROLE.test(value)) return "E-commerce и доставка";
+  if (/(?<![\p{L}])b2b(?![\p{L}])/u.test(value)) return "B2B";
+  if (/\bcoo\b|chief operating|операционн\p{L}*\s+директор|директор\s+по\s+операционн|head of operations/u.test(value)) {
+    return "Операционный директор";
+  }
+  if (/операционн\p{L}*\s+проект|проект\p{L}*\s+операционн/u.test(value)) return "Операционные проекты";
+  if (/руководител\p{L}*\s+направлен/u.test(value)) return "Руководитель направления";
+  if (/проект|project/.test(value)) return "Менеджер проектов";
+  if (/операционн/.test(value)) return "Операционный менеджер";
+  return "Другое";
 }

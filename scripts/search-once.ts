@@ -1,5 +1,4 @@
-import { coverLetter } from "../src/letter.ts";
-import { profile } from "../src/profile.ts";
+import { templateLetter } from "../src/letter.ts";
 import { findVacancies, selectMatches } from "../src/search.ts";
 
 const now = new Date();
@@ -9,6 +8,7 @@ const found = await findVacancies({
   periodDays: 14,
   enrichLimit: 12,
   superjobKey: process.env.SUPERJOB_API_KEY,
+  minSalary: 250_000,
 });
 
 console.log("sources:");
@@ -21,11 +21,12 @@ const chosen = selectMatches(found.vacancies, {
   periodDays: 14,
   minScore: 78,
   limit: 5,
+  minSalary: 250_000,
 });
 
 console.log(`\nmatches: ${chosen.length}`);
 for (const vacancy of chosen) {
   console.log(`\n[${vacancy.score}] ${vacancy.source} ${vacancy.title} — ${vacancy.company} — ${vacancy.city}`);
   console.log(vacancy.url);
-  console.log(coverLetter(vacancy, { telegram: profile.telegram }));
+  console.log(templateLetter(vacancy));
 }

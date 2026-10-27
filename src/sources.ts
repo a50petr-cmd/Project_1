@@ -120,8 +120,18 @@ const LEADERSHIP =
 const PROJECTS =
   '"операционный менеджер" OR "руководитель операционных проектов" OR "менеджер операционных проектов" OR "менеджер проекта" OR "менеджер проектов" OR "руководитель проектов" OR "руководитель направления"';
 
+const FRANCHISE_B2B =
+  'франчайзинг OR франшизы OR франчайзингу OR "развитие сети" OR "развитию сети" OR "руководитель B2B" OR "директор B2B" OR "руководитель направления B2B" OR "Head of B2B"';
+const ECOMMERCE =
+  '"руководитель e-commerce" OR "директор e-commerce" OR "head of e-commerce" OR "руководитель интернет-магазина" OR "директор интернет-магазина" OR "e-grocery" OR "руководитель доставки" OR "директор по доставке" OR "руководитель направления доставки"';
+
 export function hhQueries(): BoardQuery[] {
-  return [russiaQuery(LEADERSHIP, "moreThan6"), russiaQuery(PROJECTS, null)];
+  return [
+    russiaQuery(LEADERSHIP, "moreThan6"),
+    russiaQuery(PROJECTS, null),
+    russiaQuery(FRANCHISE_B2B, null),
+    russiaQuery(ECOMMERCE, null),
+  ];
 }
 
 export function zarplataQueries(): BoardQuery[] {
@@ -173,7 +183,7 @@ export function mapTrudVacancy(raw: TrudVacancy): Vacancy | null {
   };
 }
 
-const TRUD_QUERIES = ["операционный директор", "руководитель операционных проектов", "менеджер проекта", "руководитель направления"];
+const TRUD_QUERIES = ["операционный директор", "руководитель операционных проектов", "менеджер проекта", "руководитель направления", "франчайзинг"];
 
 export async function searchTrudvsem(fetchImpl: FetchLike): Promise<{ report: SourceReport; vacancies: Vacancy[] }> {
   const vacancies: Vacancy[] = [];
